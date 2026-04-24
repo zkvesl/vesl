@@ -1,0 +1,65 @@
+name: JAM Determinism
+
+# Recompiles each kernel from protocol/lib/*.hoon and asserts the resulting
+# JAM sha256 matches assets/CHECKSUMS.sha256. Catches refactors that change
+# kernel bytes without a reviewed checksum bump.
+#
+# Local equivalent: scripts/check-jam.sh
+#
+# Pins nockchain to NOCK_PIN (mirrored from vesl-nockup/sync.sh). Bump both
+# when sibling nockchain moves.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+env:
+  NOCK_PIN: c51f8040457de1c7d799de6024c4b22275371cf4
+
+jobs:
+  jam-determinism:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout vesl-core
+        uses: actions/checkout@v4
+        with:
+          path: vesl-core
+
+      - name: Checkout nockchain (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: zorp-corp/nockchain
+          ref: ${{ env.NOCK_PIN }}
+          path: nockchain
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nockchain
+
+      - name: Cache hoonc binary
+        id: hoonc-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/hoonc
+          key: hoonc-${{ env.NOCK_PIN }}
+
+      - name: Install hoonc (cache miss only)
+        if: steps.hoonc-cache.outputs.cache-hit != 'true'
+        working-directory: nockchain
+        run: make install-hoonc
+
+      - name: Set up hoon symlinks
+        working-directory: vesl-core
+        env:
+          NOCK_HOME: ${{ github.workspace }}/nockchain
+        run: ./scripts/setup-hoon-tree.sh
+
+      - name: Run check-jam.sh
+        working-directory: vesl-core
+        env:
+          NOCK_HOME: ${{ github.workspace }}/nockchain
+        run: ./scripts/check-jam.sh
