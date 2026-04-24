@@ -104,37 +104,6 @@ impl SettlementConfig {
 
     /// Resolve config from CLI args, toml, and mode defaults.
     ///
-    /// Preserved for tests and legacy callers. Internally calls
-    /// `resolve_checked` and panics on misconfiguration. Production
-    /// code should prefer `resolve_checked` so it can surface
-    /// operator-actionable errors via `main.rs`.
-    pub fn resolve(
-        cli_mode: Option<SettlementMode>,
-        cli_chain_endpoint: Option<String>,
-        cli_submit: bool,
-        cli_tx_fee: Option<u64>,
-        cli_coinbase_timelock_min: Option<u64>,
-        cli_accept_timeout: Option<u64>,
-        cli_seed_phrase: Option<String>,
-        toml: &SettlementToml,
-        default_signing_key: Option<[Belt; 8]>,
-    ) -> Self {
-        Self::resolve_checked(
-            cli_mode,
-            cli_chain_endpoint,
-            cli_submit,
-            cli_tx_fee,
-            cli_coinbase_timelock_min,
-            cli_accept_timeout,
-            cli_seed_phrase,
-            toml,
-            default_signing_key,
-        )
-        .unwrap_or_else(|e| panic!("SettlementConfig::resolve: {e}"))
-    }
-
-    /// Resolve config from CLI args, toml, and mode defaults.
-    ///
     /// Resolution order: CLI > env > toml > mode defaults.
     /// Backward compat: `--chain-endpoint` without `--settlement-mode` infers fakenet.
     ///
@@ -271,7 +240,7 @@ mod tests {
     #[test]
     fn default_is_local() {
         let toml = SettlementToml::default();
-        let cfg = SettlementConfig::resolve(None, None, false, None, None, None, None, &toml, None);
+        let cfg = SettlementConfig::resolve_checked(None, None, false, None, None, None, None, &toml, None).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Local);
         assert!(cfg.chain_endpoint.is_none());
         assert!(cfg.signing_key.is_none());
@@ -281,7 +250,7 @@ mod tests {
     #[test]
     fn chain_endpoint_infers_fakenet() {
         let toml = SettlementToml::default();
-        let cfg = SettlementConfig::resolve(
+        let cfg = SettlementConfig::resolve_checked(
             None,
             Some("http://localhost:9090".into()),
             false,
@@ -291,7 +260,7 @@ mod tests {
             None,
             &toml,
             Some([Belt(1); 8]),
-        );
+        ).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Fakenet);
         assert!(cfg.signing_key.is_some());
         assert!(cfg.auto_submit);
@@ -300,14 +269,14 @@ mod tests {
     #[test]
     fn submit_flag_infers_fakenet() {
         let toml = SettlementToml::default();
-        let cfg = SettlementConfig::resolve(None, None, true, None, None, None, None, &toml, None);
+        let cfg = SettlementConfig::resolve_checked(None, None, true, None, None, None, None, &toml, None).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Fakenet);
     }
 
     #[test]
     fn explicit_local_ignores_chain_endpoint() {
         let toml = SettlementToml::default();
-        let cfg = SettlementConfig::resolve(
+        let cfg = SettlementConfig::resolve_checked(
             Some(SettlementMode::Local),
             Some("http://localhost:9090".into()),
             true,
@@ -317,7 +286,7 @@ mod tests {
             None,
             &toml,
             None,
-        );
+        ).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Local);
         assert!(cfg.chain_endpoint.is_none());
         assert!(!cfg.auto_submit);
@@ -327,7 +296,7 @@ mod tests {
     fn fakenet_defaults() {
         let toml = SettlementToml::default();
         let demo_key = [Belt(42); 8];
-        let cfg = SettlementConfig::resolve(
+        let cfg = SettlementConfig::resolve_checked(
             Some(SettlementMode::Fakenet),
             None,
             false,
@@ -337,7 +306,7 @@ mod tests {
             None,
             &toml,
             Some(demo_key),
-        );
+        ).unwrap();
         assert_eq!(cfg.chain_endpoint.as_deref(), Some("http://localhost:9090"));
         assert_eq!(cfg.tx_fee, 256);
         assert_eq!(cfg.coinbase_timelock_min, 1);
@@ -353,7 +322,7 @@ mod tests {
             chain_endpoint: Some("http://custom:9090".into()),
             ..Default::default()
         };
-        let cfg = SettlementConfig::resolve(
+        let cfg = SettlementConfig::resolve_checked(
             Some(SettlementMode::Fakenet),
             None,
             false,
@@ -363,7 +332,7 @@ mod tests {
             None,
             &toml,
             None,
-        );
+        ).unwrap();
         assert_eq!(cfg.tx_fee, 5000);
         assert_eq!(cfg.coinbase_timelock_min, 10);
         assert_eq!(cfg.chain_endpoint.as_deref(), Some("http://custom:9090"));
@@ -375,7 +344,7 @@ mod tests {
             tx_fee: Some(5000),
             ..Default::default()
         };
-        let cfg = SettlementConfig::resolve(
+        let cfg = SettlementConfig::resolve_checked(
             Some(SettlementMode::Fakenet),
             Some("http://cli:9090".into()),
             false,
@@ -385,7 +354,7 @@ mod tests {
             None,
             &toml,
             None,
-        );
+        ).unwrap();
         assert_eq!(cfg.tx_fee, 7000);
         assert_eq!(cfg.chain_endpoint.as_deref(), Some("http://cli:9090"));
     }
@@ -396,7 +365,7 @@ mod tests {
             settlement_mode: Some("fakenet".into()),
             ..Default::default()
         };
-        let cfg = SettlementConfig::resolve(None, None, false, None, None, None, None, &toml, None);
+        let cfg = SettlementConfig::resolve_checked(None, None, false, None, None, None, None, &toml, None).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Fakenet);
     }
 
@@ -406,7 +375,7 @@ mod tests {
             chain_endpoint: Some("http://node:9090".into()),
             ..Default::default()
         };
-        let cfg = SettlementConfig::resolve(
+        let cfg = SettlementConfig::resolve_checked(
             Some(SettlementMode::Dumbnet),
             None,
             false,
@@ -416,7 +385,7 @@ mod tests {
             Some("test seed phrase for key derivation".into()),
             &toml,
             None,
-        );
+        ).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Dumbnet);
         assert!(cfg.signing_key.is_some());
         assert!(cfg.auto_submit);
@@ -429,7 +398,7 @@ mod tests {
         assert!(!local.can_submit());
 
         let toml = SettlementToml::default();
-        let fakenet = SettlementConfig::resolve(
+        let fakenet = SettlementConfig::resolve_checked(
             Some(SettlementMode::Fakenet),
             None,
             false,
@@ -439,7 +408,7 @@ mod tests {
             None,
             &toml,
             Some([Belt(1); 8]),
-        );
+        ).unwrap();
         assert!(fakenet.can_submit());
     }
 

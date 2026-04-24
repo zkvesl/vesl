@@ -3,7 +3,7 @@
 //! Re-exports generic config from vesl-core and adds:
 //! - HullConfig (domain-specific toml fields)
 //! - load_config() for reading hull.toml / vesl.toml
-//! - resolve_with_demo_key() convenience wrapper
+//! - resolve_with_demo_key_checked() convenience wrapper
 
 use std::path::Path;
 
@@ -62,32 +62,7 @@ pub fn load_config(path: &Path) -> HullConfig {
 // ---------------------------------------------------------------------------
 
 /// Resolve settlement config with hull defaults (demo key for fakenet).
-/// Preserved for tests. Production callers should prefer the checked variant.
-pub fn resolve_with_demo_key(
-    cli_mode: Option<SettlementMode>,
-    cli_chain_endpoint: Option<String>,
-    cli_submit: bool,
-    cli_tx_fee: Option<u64>,
-    cli_coinbase_timelock_min: Option<u64>,
-    cli_accept_timeout: Option<u64>,
-    cli_seed_phrase: Option<String>,
-    toml: &HullConfig,
-) -> SettlementConfig {
-    let settlement_toml = SettlementToml::from(toml);
-    SettlementConfig::resolve(
-        cli_mode,
-        cli_chain_endpoint,
-        cli_submit,
-        cli_tx_fee,
-        cli_coinbase_timelock_min,
-        cli_accept_timeout,
-        cli_seed_phrase,
-        &settlement_toml,
-        Some(signing::demo_signing_key()),
-    )
-}
-
-/// Checked variant — surfaces misconfiguration as a typed error for main.rs (L-14).
+/// Surfaces misconfiguration as a typed error for main.rs (L-14).
 pub fn resolve_with_demo_key_checked(
     cli_mode: Option<SettlementMode>,
     cli_chain_endpoint: Option<String>,
@@ -123,7 +98,7 @@ mod tests {
     #[test]
     fn default_is_local() {
         let toml = HullConfig::default();
-        let cfg = resolve_with_demo_key(None, None, false, None, None, None, None, &toml);
+        let cfg = resolve_with_demo_key_checked(None, None, false, None, None, None, None, &toml).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Local);
         assert!(cfg.chain_endpoint.is_none());
         assert!(cfg.signing_key.is_none());
@@ -133,7 +108,7 @@ mod tests {
     #[test]
     fn chain_endpoint_infers_fakenet() {
         let toml = HullConfig::default();
-        let cfg = resolve_with_demo_key(
+        let cfg = resolve_with_demo_key_checked(
             None,
             Some("http://localhost:9090".into()),
             false,
@@ -142,7 +117,7 @@ mod tests {
             None,
             None,
             &toml,
-        );
+        ).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Fakenet);
         assert!(cfg.signing_key.is_some());
         assert!(cfg.auto_submit);
@@ -151,7 +126,7 @@ mod tests {
     #[test]
     fn explicit_local_ignores_chain_endpoint() {
         let toml = HullConfig::default();
-        let cfg = resolve_with_demo_key(
+        let cfg = resolve_with_demo_key_checked(
             Some(SettlementMode::Local),
             Some("http://localhost:9090".into()),
             true,
@@ -160,7 +135,7 @@ mod tests {
             None,
             None,
             &toml,
-        );
+        ).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Local);
         assert!(cfg.chain_endpoint.is_none());
         assert!(!cfg.auto_submit);
@@ -169,7 +144,7 @@ mod tests {
     #[test]
     fn fakenet_defaults() {
         let toml = HullConfig::default();
-        let cfg = resolve_with_demo_key(
+        let cfg = resolve_with_demo_key_checked(
             Some(SettlementMode::Fakenet),
             None,
             false,
@@ -178,7 +153,7 @@ mod tests {
             None,
             None,
             &toml,
-        );
+        ).unwrap();
         assert_eq!(cfg.chain_endpoint.as_deref(), Some("http://localhost:9090"));
         assert_eq!(cfg.tx_fee, 256);
         assert_eq!(cfg.coinbase_timelock_min, 1);
@@ -192,7 +167,7 @@ mod tests {
             tx_fee: Some(5000),
             ..Default::default()
         };
-        let cfg = resolve_with_demo_key(
+        let cfg = resolve_with_demo_key_checked(
             Some(SettlementMode::Fakenet),
             Some("http://cli:9090".into()),
             false,
@@ -201,7 +176,7 @@ mod tests {
             None,
             None,
             &toml,
-        );
+        ).unwrap();
         assert_eq!(cfg.tx_fee, 7000);
         assert_eq!(cfg.chain_endpoint.as_deref(), Some("http://cli:9090"));
     }
