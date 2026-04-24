@@ -6,6 +6,8 @@ Grafts in Vesl fall into five families: **commitment** (shipped), **verification
 
 For the LLM/RAG reference implementation (ingest, retrieve, Ollama, on-chain settlement), see [zkvesl/hull-llm](https://github.com/zkvesl/hull-llm).
 
+The repo name reflects its flagship Rust crate. Alongside `vesl-core` this tree ships `nock-noun-rs`, `nockchain-tip5-rs`, `nockchain-client-rs`, the `hull` harness, the Hoon kernels, and the graft templates.
+
 
 ## Structure
 
@@ -106,8 +108,8 @@ For contributors who want a local nockchain checkout and bare-metal builds.
 Prerequisites: [nockchain](https://github.com/zorp-corp/nockchain) monorepo cloned and built at a sibling path, with `hoonc` and `nockchain` in your PATH. Rust nightly `2025-11-26` (pinned in `hull/rust-toolchain`).
 
 ```bash
-git clone https://github.com/zkVesl/vesl.git
-cd vesl
+git clone https://github.com/zkvesl/vesl-core.git
+cd vesl-core
 cp vesl.toml.example vesl.toml     # edit nock_home if your layout differs
 make setup                          # create hoon symlinks
 make build                          # compile hull

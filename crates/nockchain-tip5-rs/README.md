@@ -133,7 +133,7 @@ cargo test  // 14 tests: structure, determinism, verification,
 
 ## Who made this
 
-Extracted from [Vesl](https://github.com/zkVesl/vesl). Previously,
+Extracted from [Vesl](https://github.com/zkvesl/vesl-core). Previously,
 the only way to get tip5 in Rust was to depend on `nockchain-math` from
 the monorepo and figure out the rest yourself. Now you don't have to.
 

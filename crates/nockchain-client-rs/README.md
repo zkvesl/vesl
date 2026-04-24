@@ -113,7 +113,7 @@ Depends on the nockchain monorepo crates via local paths. For standalone use, sw
 
 ```toml
 [dependencies]
-nockchain-client-rs = { git = "https://github.com/zkVesl/vesl.git", path = "crates/nockchain-client-rs" }
+nockchain-client-rs = { git = "https://github.com/zkvesl/vesl-core.git", path = "crates/nockchain-client-rs" }
 ```
 
 ~

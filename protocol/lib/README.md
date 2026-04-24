@@ -166,4 +166,4 @@ Eight arms. Zero configuration. Compiler does the rest.
 ::  to fit in a Nock subject
 ```
 
-Part of [Vesl](https://github.com/zkVesl/vesl). `~`
+Part of [Vesl](https://github.com/zkvesl/vesl-core). `~`
