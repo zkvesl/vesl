@@ -105,7 +105,17 @@ For developers integrating by hand, [GRAFTING.md](templates/GRAFTING.md) is the 
 
 For contributors who want a local nockchain checkout and bare-metal builds.
 
-Prerequisites: [nockchain](https://github.com/zorp-corp/nockchain) monorepo cloned and built at a sibling path, with `hoonc` and `nockchain` in your PATH. Rust nightly `2025-11-26` (pinned in `hull/rust-toolchain`).
+**Layout.** vesl-core is optimized for local development. Every Rust crate in this repo (and every template under `templates/`) uses `path = "../../../nockchain/crates/..."` — `../../nockchain/...` from `hull/` — to reach into the Nockchain monorepo. That means you need the two repos as siblings:
+
+```
+<wherever>/
+├── nockchain/                     # https://github.com/zorp-corp/nockchain
+└── vesl-core/                     # this repo
+```
+
+If your layout differs, rewrite the `path = "..."` entries in each `Cargo.toml` to fit your tree — or swap them for git-deps against `nockchain/nockchain` at a rev you want to pin. We don't ship a canonical rev for forks; plug the Nockchain dep however works for you.
+
+**Prerequisites:** `hoonc` and `nockchain` on your `$PATH` (built from the Nockchain monorepo). Rust nightly `2025-11-26` (pinned in `hull/rust-toolchain` and each `crates/<name>/rust-toolchain*` / `templates/<name>/rust-toolchain.toml`).
 
 ```bash
 git clone https://github.com/zkvesl/vesl-core.git

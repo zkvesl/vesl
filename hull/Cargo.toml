@@ -11,8 +11,8 @@ path = "src/lib.rs"
 name = "hull"
 path = "src/main.rs"
 
-# Nockchain monorepo pin: 505c3ea (2026-03-25)
 # All nockchain crate paths resolve relative to $NOCK_HOME = ../../nockchain
+# (sibling clone — see README §Setup).
 
 [dependencies]
 hex = "0.4"
@@ -48,15 +48,3 @@ tempfile = "3"
 tower = "0.5"
 http-body-util = "0.1"
 
-# Redirect vesl-core's git-dep nockchain back to the local monorepo path so
-# hull + vesl-core resolve to a single nockchain source (no duplicate compilations
-# of nockvm/nockapp/etc). Only the names vesl-core actually git-deps need to appear.
-[patch."https://github.com/nockchain/nockchain.git"]
-nockvm = { path = "../../nockchain/crates/nockvm/rust/nockvm" }
-nockvm_macros = { path = "../../nockchain/crates/nockvm/rust/nockvm_macros" }
-nockapp = { path = "../../nockchain/crates/nockapp" }
-nockapp-grpc = { path = "../../nockchain/crates/nockapp-grpc" }
-nockchain-types = { path = "../../nockchain/crates/nockchain-types" }
-nockchain-math = { path = "../../nockchain/crates/nockchain-math" }
-noun-serde = { path = "../../nockchain/crates/noun-serde" }
-ibig = { path = "../../nockchain/crates/nockvm/rust/ibig" }

@@ -10,9 +10,9 @@ name = "data-registry"
 path = "src/main.rs"
 
 [dependencies]
-nockapp = { git = "https://github.com/nockchain/nockchain.git", rev = "505c3ea586bacfece2d451fbd01dfa18105facea" }
-nockvm = { git = "https://github.com/nockchain/nockchain.git", rev = "505c3ea586bacfece2d451fbd01dfa18105facea" }
-nockvm_macros = { git = "https://github.com/nockchain/nockchain.git", rev = "505c3ea586bacfece2d451fbd01dfa18105facea" }
+nockapp = { path = "../../../nockchain/crates/nockapp" }
+nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
+nockvm_macros = { path = "../../../nockchain/crates/nockvm/rust/nockvm_macros" }
 
 tokio = { version = "1.32", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0"

@@ -11,14 +11,16 @@ nockchain-tip5-rs = { path = "../nockchain-tip5-rs", features = ["serde"] }
 nock-noun-rs = { path = "../nock-noun-rs" }
 nockchain-client-rs = { path = "../nockchain-client-rs" }
 
-# Nockchain monorepo crates (git-dep so downstream consumers can git-dep vesl-core)
-nockapp = { git = "https://github.com/nockchain/nockchain.git", rev = "a19f8017ef2f0ee38ea7c850a84189f817a9f93a", default-features = false }
-nockvm = { git = "https://github.com/nockchain/nockchain.git", rev = "a19f8017ef2f0ee38ea7c850a84189f817a9f93a" }
-nockchain-math = { git = "https://github.com/nockchain/nockchain.git", rev = "a19f8017ef2f0ee38ea7c850a84189f817a9f93a" }
-nockchain-types = { git = "https://github.com/nockchain/nockchain.git", rev = "a19f8017ef2f0ee38ea7c850a84189f817a9f93a" }
-noun-serde = { git = "https://github.com/nockchain/nockchain.git", rev = "a19f8017ef2f0ee38ea7c850a84189f817a9f93a" }
-nockvm_macros = { git = "https://github.com/nockchain/nockchain.git", rev = "a19f8017ef2f0ee38ea7c850a84189f817a9f93a" }
-ibig = { git = "https://github.com/nockchain/nockchain.git", rev = "a19f8017ef2f0ee38ea7c850a84189f817a9f93a" }
+# Nockchain monorepo crates — path-dep to sibling ../nockchain clone.
+# vesl-core is optimized for local dev; forkers replicate the sibling layout
+# or rewrite these paths. See README §Setup.
+nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }
+nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
+nockchain-math = { path = "../../../nockchain/crates/nockchain-math" }
+nockchain-types = { path = "../../../nockchain/crates/nockchain-types" }
+noun-serde = { path = "../../../nockchain/crates/noun-serde" }
+nockvm_macros = { path = "../../../nockchain/crates/nockvm/rust/nockvm_macros" }
+ibig = { path = "../../../nockchain/crates/nockvm/rust/ibig" }
 
 # Standard deps
 anyhow = "1.0"
