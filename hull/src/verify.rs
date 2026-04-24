@@ -99,7 +99,7 @@ mod tests {
             .enumerate()
             .map(|(i, field)| FieldWithProof {
                 field,
-                proof: mint.proof(i),
+                proof: mint.proof(i).expect("proof within committed range"),
             })
             .collect();
 
@@ -124,7 +124,7 @@ mod tests {
         // Tamper with the value
         let tampered = vec![FieldWithProof {
             field: Field { key: "commit".into(), value: "TAMPERED".into() },
-            proof: mint.proof(0),
+            proof: mint.proof(0).expect("proof within committed range"),
         }];
 
         let data = serde_json::to_vec(&tampered).unwrap();
