@@ -26,7 +26,6 @@ pub mod types;
 pub use mint::Mint;
 pub use guard::Guard;
 pub use settle::Settle;
-pub use forge::Forge;
 
 pub use types::{
     Chunk, Manifest, Note, NockZkp, NoteState, Retrieval,

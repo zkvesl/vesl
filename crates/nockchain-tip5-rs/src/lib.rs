@@ -151,7 +151,7 @@ fn atom_bytes_to_belts(bytes: &[u8]) -> Vec<Belt> {
         return vec![Belt(0)];
     }
     let bytes = &bytes[..len];
-    let mut belts = Vec::with_capacity((len + 6) / 7);
+    let mut belts = Vec::with_capacity(len.div_ceil(7));
     for chunk in bytes.chunks(7) {
         let mut val: u64 = 0;
         for (i, &b) in chunk.iter().enumerate() {
@@ -243,7 +243,7 @@ impl MerkleTree {
         let mut levels = vec![current.clone()];
 
         while current.len() > 1 {
-            if current.len() % 2 != 0 {
+            if !current.len().is_multiple_of(2) {
                 let last = *current.last().unwrap();
                 current.push(last);
             }
@@ -282,7 +282,7 @@ impl MerkleTree {
         let mut idx = index;
 
         for level in &self.levels[..self.levels.len() - 1] {
-            let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+            let sibling_idx = if idx.is_multiple_of(2) { idx + 1 } else { idx - 1 };
 
             let sibling_hash = if sibling_idx < level.len() {
                 level[sibling_idx]

@@ -575,7 +575,7 @@ mod tests {
     async fn settle_with_mock_verifier_pass() {
         let root: Tip5Hash = [1, 2, 3, 4, 5];
         let mut settler = Settle::with_verifier(MockVerifier { should_pass: true });
-        settler.register_root(root);
+        settler.register_root(root).unwrap();
 
         let payload = GraftPayload {
             note: Note {
@@ -597,7 +597,7 @@ mod tests {
     async fn settle_with_mock_verifier_fail() {
         let root: Tip5Hash = [1, 2, 3, 4, 5];
         let mut settler = Settle::with_verifier(MockVerifier { should_pass: false });
-        settler.register_root(root);
+        settler.register_root(root).unwrap();
 
         let payload = GraftPayload {
             note: Note {
@@ -639,7 +639,7 @@ mod tests {
     async fn settle_default_rag_settle_manifest() {
         let (manifest, root) = build_test_manifest();
         let mut settler = Settle::without_kernel();
-        settler.register_root(root);
+        settler.register_root(root).unwrap();
 
         let note = Note {
             id: 42,
@@ -659,7 +659,7 @@ mod tests {
     async fn settle_duplicate_note_rejected() {
         let root: Tip5Hash = [1, 2, 3, 4, 5];
         let mut settler = Settle::with_verifier(MockVerifier { should_pass: true });
-        settler.register_root(root);
+        settler.register_root(root).unwrap();
 
         let payload = GraftPayload {
             note: Note { id: 1, hull: 7, root, state: NoteState::Pending },
@@ -682,7 +682,7 @@ mod tests {
     async fn settle_non_pending_note_rejected() {
         let root: Tip5Hash = [1, 2, 3, 4, 5];
         let mut settler = Settle::with_verifier(MockVerifier { should_pass: true });
-        settler.register_root(root);
+        settler.register_root(root).unwrap();
 
         let payload = GraftPayload {
             note: Note { id: 1, hull: 7, root, state: NoteState::Settled },

@@ -175,7 +175,7 @@ pub fn sign(sk: &[Belt; 8], message: &[Belt; 5]) -> Result<SchnorrSignature, Sig
 pub fn key_from_seed_phrase(phrase: &str) -> Result<[Belt; 8], SigningError> {
     let bytes = phrase.as_bytes();
     // Pack bytes into Belt values (8 bytes per Belt, little-endian)
-    let mut belts: Vec<Belt> = Vec::with_capacity((bytes.len() + 7) / 8);
+    let mut belts: Vec<Belt> = Vec::with_capacity(bytes.len().div_ceil(8));
     for chunk in bytes.chunks(8) {
         let mut val: u64 = 0;
         for (i, &b) in chunk.iter().enumerate() {

@@ -2,11 +2,11 @@
 //!
 //! Provides composable helpers for STARK proof handling:
 //! - Extract proof bytes from kernel effects after a %prove poke
-//! - Build a generic %prove poke from pre-jammed payload bytes
+//! - Build `%prove` / `%settle` / `%verify` pokes over a ForgePayload
 //!
-//! The hull fires the %prove poke and manages the NockApp. Forge
-//! provides the effect parsing and poke construction. Kernel boot
-//! (including prover jet registration) is the hull's responsibility.
+//! The hull fires the poke and manages the NockApp. Forge provides the
+//! effect parsing and poke construction. Kernel boot (including prover
+//! jet registration) is the hull's responsibility.
 
 use anyhow::Result;
 use nock_noun_rs::{atom_from_u64, make_atom_in, make_list_in, make_loobean, make_tag_in, jam_to_bytes, new_stack, slab_root, NounSlab, T};
@@ -61,19 +61,6 @@ pub fn extract_proof_from_effects(effects: &[NounSlab]) -> Result<Option<bytes::
     Ok(None)
 }
 
-/// Build a generic `%prove` poke from pre-jammed payload bytes.
-///
-/// Constructs `[%prove jammed-payload-atom]`. The caller jams their
-/// domain-specific payload before calling this.
-pub fn build_prove_poke_generic(jammed_payload: &[u8]) -> NounSlab {
-    let mut slab = NounSlab::new();
-    let tag = make_atom_in(&mut slab, b"prove");
-    let payload = make_atom_in(&mut slab, jammed_payload);
-    let poke = T(&mut slab, &[tag, payload]);
-    slab.set_root(poke);
-    slab
-}
-
 /// Build a forge-payload noun inside a NounSlab.
 ///
 /// Noun shape:
@@ -94,8 +81,8 @@ fn build_forge_payload_in(
     let root_bytes = tip5_to_atom_le_bytes(&payload.note.root);
     let root_noun = make_atom_in(slab, &root_bytes);
     let state_tag = make_tag_in(slab, "pending");
-    let state = nockvm::noun::T(slab, &[state_tag, nockvm::noun::D(0)]);
-    let note_noun = nockvm::noun::T(slab, &[id, hull, root_noun, state]);
+    let state = T(slab, &[state_tag, nockvm::noun::D(0)]);
+    let note_noun = T(slab, &[id, hull, root_noun, state]);
 
     // Leaves: list of [dat=@ proof=(list [hash=@ side=?])]
     let leaf_nouns: Vec<nockvm::noun::Noun> = payload
@@ -111,12 +98,12 @@ fn build_forge_payload_in(
                     let hash_bytes = tip5_to_atom_le_bytes(&p.hash);
                     let hash = make_atom_in(slab, &hash_bytes);
                     let side = make_loobean(p.side);
-                    nockvm::noun::T(slab, &[hash, side])
+                    T(slab, &[hash, side])
                 })
                 .collect();
             let proof_list = make_list_in(slab, &proof_nodes);
 
-            nockvm::noun::T(slab, &[dat_atom, proof_list])
+            T(slab, &[dat_atom, proof_list])
         })
         .collect();
     let leaves_noun = make_list_in(slab, &leaf_nouns);
@@ -125,7 +112,7 @@ fn build_forge_payload_in(
     let exp_root_bytes = tip5_to_atom_le_bytes(&payload.expected_root);
     let exp_root = make_atom_in(slab, &exp_root_bytes);
 
-    nockvm::noun::T(slab, &[note_noun, leaves_noun, exp_root])
+    T(slab, &[note_noun, leaves_noun, exp_root])
 }
 
 /// Build a forge poke with the given tag and payload.
@@ -140,7 +127,7 @@ fn build_forge_poke(tag: &str, payload: &ForgePayload) -> NounSlab {
     };
     let jammed = make_atom_in(&mut slab, &payload_bytes);
 
-    let poke = nockvm::noun::T(&mut slab, &[tag_noun, jammed]);
+    let poke = T(&mut slab, &[tag_noun, jammed]);
     slab.set_root(poke);
     slab
 }
@@ -159,13 +146,6 @@ pub fn build_forge_settle_poke(payload: &ForgePayload) -> NounSlab {
 pub fn build_forge_verify_poke(payload: &ForgePayload) -> NounSlab {
     build_forge_poke("verify", payload)
 }
-
-/// Placeholder struct for future full STARK prover integration.
-///
-/// When the STARK prover is wired in, this struct will hold the
-/// hot state (zkvm-jetpack prover context). For now, the hull
-/// handles kernel boot with prover jets directly.
-pub struct Forge;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -228,14 +208,6 @@ mod tests {
     }
 
     // --- Basic poke construction ---
-
-    #[test]
-    fn build_prove_poke_generic_produces_cell() {
-        let payload = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        let slab = build_prove_poke_generic(&payload);
-        let root = slab_root(&slab);
-        assert!(root.is_cell(), "prove poke must be a cell [%prove payload]");
-    }
 
     #[test]
     fn build_forge_prove_poke_produces_cell() {
@@ -418,15 +390,15 @@ mod tests {
 
         // Build result-note: [id=1 hull=42 root=7 [%settled 0]]
         let settled_tag = make_tag_in(&mut slab, "settled");
-        let state = nockvm::noun::T(&mut slab, &[settled_tag, D(0)]);
-        let result_note = nockvm::noun::T(&mut slab, &[D(1), D(42), D(7), state]);
+        let state = T(&mut slab, &[settled_tag, D(0)]);
+        let result_note = T(&mut slab, &[D(1), D(42), D(7), state]);
 
         // Proof atom
         let proof_bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
         let proof_atom = make_atom_in(&mut slab, &proof_bytes);
 
         // Effect: [result-note proof-atom]
-        let effect = nockvm::noun::T(&mut slab, &[result_note, proof_atom]);
+        let effect = T(&mut slab, &[result_note, proof_atom]);
         slab.set_root(effect);
 
         let result = extract_proof_from_effects(&[slab]).unwrap();

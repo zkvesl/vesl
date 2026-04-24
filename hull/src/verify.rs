@@ -88,7 +88,7 @@ mod tests {
             Field { key: "config".into(), value: "release".into() },
         ];
 
-        let leaf_data: Vec<Vec<u8>> = fields.iter().map(|f| field_to_leaf_bytes(f)).collect();
+        let leaf_data: Vec<Vec<u8>> = fields.iter().map(field_to_leaf_bytes).collect();
         let leaf_refs: Vec<&[u8]> = leaf_data.iter().map(|v| v.as_slice()).collect();
 
         let mut mint = Mint::new();
@@ -111,11 +111,9 @@ mod tests {
 
     #[test]
     fn field_verifier_tampered_value() {
-        let fields = vec![
-            Field { key: "commit".into(), value: "abc123".into() },
-        ];
+        let fields = [Field { key: "commit".into(), value: "abc123".into() }];
 
-        let leaf_data: Vec<Vec<u8>> = fields.iter().map(|f| field_to_leaf_bytes(f)).collect();
+        let leaf_data: Vec<Vec<u8>> = fields.iter().map(field_to_leaf_bytes).collect();
         let leaf_refs: Vec<&[u8]> = leaf_data.iter().map(|v| v.as_slice()).collect();
 
         let mut mint = Mint::new();

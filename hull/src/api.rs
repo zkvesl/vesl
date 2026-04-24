@@ -335,7 +335,7 @@ async fn commit_handler(
     }
 
     // Build Merkle tree from field data
-    let leaf_data: Vec<Vec<u8>> = req.fields.iter().map(|f| field_to_leaf_bytes(f)).collect();
+    let leaf_data: Vec<Vec<u8>> = req.fields.iter().map(field_to_leaf_bytes).collect();
     let leaf_refs: Vec<&[u8]> = leaf_data.iter().map(|v| v.as_slice()).collect();
     let tree = MerkleTree::build(&leaf_refs);
     let root = tree.root();
