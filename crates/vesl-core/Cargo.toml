@@ -12,8 +12,6 @@ nock-noun-rs = { path = "../nock-noun-rs" }
 nockchain-client-rs = { path = "../nockchain-client-rs" }
 
 # Nockchain monorepo crates — path-dep to sibling ../nockchain clone.
-# vesl-core is optimized for local dev; forkers replicate the sibling layout
-# or rewrite these paths. See README §Setup.
 nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }
 nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
 nockchain-math = { path = "../../../nockchain/crates/nockchain-math" }

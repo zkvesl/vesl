@@ -23,13 +23,13 @@ help:
 	@echo "Quick start:"
 	@echo "  cp vesl.toml.example vesl.toml   # edit nock_home if needed"
 	@echo "  make setup                        # create hoon symlinks"
-	@echo "  make build                        # compile hull"
+	@echo "  make build                        # compile the workspace"
 	@echo ""
 	@echo "Targets:"
 	@echo "  setup       Create hoon/ symlinks to nockchain monorepo"
-	@echo "  build       Compile hull (cargo build --release)"
-	@echo "  test        Run all tests"
-	@echo "  test-unit   Run unit tests only"
+	@echo "  build       Compile the workspace (cargo build --workspace --release)"
+	@echo "  test        Run all workspace tests"
+	@echo "  test-unit   Run unit tests only (workspace libraries)"
 	@echo "  clean       Remove build artifacts"
 	@echo ""
 	@echo "For the LLM/RAG reference implementation, see zkvesl/hull-llm."
@@ -45,7 +45,7 @@ check-cargo:
 	@command -v cargo >/dev/null 2>&1 || { \
 		echo "Error: cargo not found."; \
 		echo "Install Rust: https://rustup.rs"; \
-		echo "Required nightly: $$(cat hull/rust-toolchain 2>/dev/null || echo 'see hull/rust-toolchain')"; \
+		echo "Required nightly: $$(grep channel rust-toolchain.toml 2>/dev/null | sed 's/.*= *"\(.*\)"/\1/' || echo 'see rust-toolchain.toml')"; \
 		exit 1; \
 	}
 
@@ -83,15 +83,15 @@ setup: check-cargo check-nock-home
 	@NOCK_HOME="$(NOCK_HOME)" ./scripts/setup-hoon-tree.sh
 
 build: check-cargo
-	cd hull && cargo build --release
+	cargo build --workspace --release
 
 test: check-cargo
-	cd hull && cargo test
+	cargo test --workspace
 
 test-unit: check-cargo
-	cd hull && cargo test --lib
+	cargo test --workspace --lib
 
 clean:
-	cd hull && cargo clean 2>/dev/null || true
+	cargo clean 2>/dev/null || true
 	rm -rf hull/.data.vesl/ out.jam
 	@echo "Clean."

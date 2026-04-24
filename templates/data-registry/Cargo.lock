@@ -1490,7 +1490,6 @@ dependencies = [
 [[package]]
 name = "ibig"
 version = "0.3.6"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 dependencies = [
  "cfg-if",
  "num-traits",
@@ -1959,7 +1958,6 @@ dependencies = [
 [[package]]
 name = "murmur3"
 version = "0.5.2"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 
 [[package]]
 name = "no-std-compat"
@@ -1970,7 +1968,6 @@ checksum = "b93853da6d84c2e3c7d730d6473e8817692dd89be387eb01b94d7f108ecb5b8c"
 [[package]]
 name = "nockapp"
 version = "0.1.0"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2027,7 +2024,6 @@ dependencies = [
 [[package]]
 name = "nockvm"
 version = "0.1.0"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 dependencies = [
  "autotools",
  "bincode",
@@ -2057,7 +2053,6 @@ dependencies = [
 [[package]]
 name = "nockvm_crypto"
 version = "0.1.0"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 dependencies = [
  "aes",
  "aes-siv",
@@ -2072,7 +2067,6 @@ dependencies = [
 [[package]]
 name = "nockvm_macros"
 version = "0.1.0"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 dependencies = [
  "quote",
  "syn",
@@ -2115,7 +2109,6 @@ dependencies = [
 [[package]]
 name = "noun-serde"
 version = "0.1.0"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 dependencies = [
  "bytes",
  "ibig",
@@ -2128,7 +2121,6 @@ dependencies = [
 [[package]]
 name = "noun-serde-derive"
 version = "0.1.0"
-source = "git+https://github.com/nockchain/nockchain.git?rev=505c3ea586bacfece2d451fbd01dfa18105facea#505c3ea586bacfece2d451fbd01dfa18105facea"
 dependencies = [
  "nockvm",
  "proc-macro2",

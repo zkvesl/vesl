@@ -105,27 +105,27 @@ For developers integrating by hand, [GRAFTING.md](templates/GRAFTING.md) is the 
 
 For contributors who want a local nockchain checkout and bare-metal builds.
 
-**Layout.** vesl-core is optimized for local development. Every Rust crate in this repo (and every template under `templates/`) uses `path = "../../../nockchain/crates/..."` — `../../nockchain/...` from `hull/` — to reach into the Nockchain monorepo. That means you need the two repos as siblings:
+**Layout.** vesl-core is a Cargo **workspace** with 8 members under `crates/`, `hull/`, and `kernels/`. The workspace root (`Cargo.toml`) declares nockchain deps as paths into a sibling `../nockchain/` clone. Templates under `templates/` are *not* workspace members — each is a standalone Cargo package meant to be copied out as a starter scaffold. Expected layout:
 
 ```
 <wherever>/
 ├── nockchain/                     # https://github.com/zorp-corp/nockchain
-└── vesl-core/                     # this repo
+└── vesl-core/                     # this repo (workspace root)
 ```
 
-If your layout differs, rewrite the `path = "..."` entries in each `Cargo.toml` to fit your tree — or swap them for git-deps against `nockchain/nockchain` at a rev you want to pin. We don't ship a canonical rev for forks; plug the Nockchain dep however works for you.
+If your layout differs, rewrite the `path = "..."` entries in `Cargo.toml` (workspace root, plus each standalone template) to fit your tree — or swap them for git-deps against `nockchain/nockchain` at a rev you want to pin. We don't ship a canonical rev for forks; plug the Nockchain dep however works for you.
 
-**Prerequisites:** `hoonc` and `nockchain` on your `$PATH` (built from the Nockchain monorepo). Rust nightly `2025-11-26` (pinned in `hull/rust-toolchain` and each `crates/<name>/rust-toolchain*` / `templates/<name>/rust-toolchain.toml`).
+**Prerequisites:** `hoonc` and `nockchain` on your `$PATH` (built from the Nockchain monorepo). Rust nightly `2025-11-26` (pinned in repo-root `rust-toolchain.toml`; templates pin it too in their own `rust-toolchain.toml` files).
 
 ```bash
 git clone https://github.com/zkvesl/vesl-core.git
 cd vesl-core
 cp vesl.toml.example vesl.toml     # edit nock_home if your layout differs
 make setup                          # create hoon symlinks
-make build                          # compile hull
+make build                          # cargo build --workspace --release
 ```
 
-Run `make help` for all available targets.
+Run `make help` for all available targets. `cargo check --workspace` verifies the whole core; for a specific template, `cd templates/<name> && cargo check` (templates are standalone).
 
 
 ## Test

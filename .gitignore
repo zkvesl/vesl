@@ -1,8 +1,10 @@
 # Build artifacts
+/target/
 hull/target/
 kernels/*/target/
 kernels/*/Cargo.lock
 templates/*/target/
+templates/*/app.nock
 crates/*/target/
 out.jam
 *.jam.bak

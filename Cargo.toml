@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vesl-core",
+    "crates/nock-noun-rs",
+    "crates/nockchain-tip5-rs",
+    "crates/nockchain-client-rs",
+    "hull",
+    "kernels/guard",
+    "kernels/mint",
+    "kernels/settle",
+]
+# Templates are independent Cargo packages — end-users copy one out and
+# build it standalone (see templates/<name>/README.md). They keep their
+# own Cargo.toml + Cargo.lock + rust-toolchain.toml; their path-deps
+# into ../../crates/ and ../../../nockchain/ resolve without workspace
+# context. `exclude` prevents cargo from auto-absorbing them.
+exclude = ["templates"]
+
+# No [workspace.dependencies] block. Members keep their own explicit
+# path-deps so each Cargo.toml stays a self-contained package manifest.
+# This matters for downstream repos (vesl-nockup, hull-llm) that sync or
+# patch individual member crates — they can consume a member's Cargo.toml
+# without needing vesl-core's workspace context. The workspace earns its
+# keep here by unifying Cargo.lock, target/, and toolchain — not by
+# centralizing dep declarations.
