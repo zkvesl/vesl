@@ -15,7 +15,7 @@ hoonc compiler drift all landed without review. The pin fixes that.
 
 ## Bumping the pin
 
-1. Pick a commit on `zorp-corp/nockchain` `main` that you want to
+1. Pick a commit on `nockchain/nockchain` `master` that you want to
    adopt.
 2. Update this file.
 3. Update the matching comment in `hull/Cargo.toml` ("Nockchain monorepo pin: ...").
@@ -27,7 +27,7 @@ hoonc compiler drift all landed without review. The pin fixes that.
 
 ```dockerfile
 ARG NOCKCHAIN_COMMIT=505c3ea586bacfece2d451fbd01dfa18105facea
-RUN git clone https://github.com/zorp-corp/nockchain.git $WORKSPACE/nockchain \
+RUN git clone https://github.com/nockchain/nockchain.git $WORKSPACE/nockchain \
     && git -C $WORKSPACE/nockchain checkout ${NOCKCHAIN_COMMIT}
 ```
 
