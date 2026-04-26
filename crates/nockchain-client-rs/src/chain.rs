@@ -19,8 +19,10 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use nockapp_grpc::pb::public::v2::nockchain_block_service_client::NockchainBlockServiceClient;
 use nockchain_types::tx_engine::common::Hash as ChainHash;
 use nockchain_types::tx_engine::v1::tx::SpendCondition;
+use tonic::transport::Channel;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -66,8 +68,14 @@ impl Default for ChainConfig {
 /// - Submitting pre-signed transactions
 /// - Polling for transaction acceptance (block inclusion)
 /// - Querying balances by address, PKH, or FirstName
+/// - Fetching block-explorer data for an existing tx
 pub struct ChainClient {
     client: nockapp_grpc::services::public_nockchain::PublicNockchainGrpcClient,
+    // Raw tonic client for the block-explorer service. The upstream
+    // `PublicNockchainGrpcClient` wraps `NockchainService` only; block-explorer
+    // RPCs (`get_transaction_block`, `get_transaction_details`) live on the
+    // separate `NockchainBlockService`. Drop this when the wrapper covers it.
+    block: NockchainBlockServiceClient<Channel>,
     config: ChainConfig,
 }
 
@@ -85,7 +93,15 @@ impl ChainClient {
                     config.endpoint
                 )
             })?;
-        Ok(Self { client, config })
+        let block = NockchainBlockServiceClient::connect(config.endpoint.clone())
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to connect block-service client to {}: {e:?}",
+                    config.endpoint
+                )
+            })?;
+        Ok(Self { client, block, config })
     }
 
     /// Submit a pre-signed raw transaction to the Nockchain node.
@@ -158,6 +174,173 @@ impl ChainClient {
     ) -> Result<bool> {
         self.submit_transaction(raw_tx).await?;
         self.wait_for_acceptance(tx_id_base58).await
+    }
+
+    /// Look up the block that included a given tx, if any.
+    ///
+    /// Returns:
+    /// - `InBlock { ... }` if the tx is confirmed in a block.
+    /// - `Pending` if the tx is in the mempool but not yet in a block.
+    /// - `NotFound` if the node has no record of this tx.
+    ///
+    /// The chain serves `NotFound` as a gRPC `Status::not_found` error;
+    /// other gRPC errors are returned as `Err`.
+    pub async fn get_transaction_block(
+        &mut self,
+        tx_id_base58: &str,
+    ) -> Result<TransactionBlockResult> {
+        use nockapp_grpc::pb::common::v1::Base58Hash;
+        use nockapp_grpc::pb::public::v2::{
+            get_transaction_block_response, GetTransactionBlockRequest,
+        };
+
+        let req = GetTransactionBlockRequest {
+            tx_id: Some(Base58Hash {
+                hash: tx_id_base58.to_string(),
+            }),
+        };
+
+        let resp = match self.block.get_transaction_block(req).await {
+            Ok(r) => r.into_inner(),
+            Err(status)
+                if status.code() == tonic::Code::NotFound
+                    || status.code() == tonic::Code::InvalidArgument =>
+            {
+                // The chain serves a malformed or unknown tx_id with the
+                // same meaning as far as the receipt is concerned: there
+                // is nothing to attest to. Surface both as `NotFound`.
+                return Ok(TransactionBlockResult::NotFound);
+            }
+            Err(status) => {
+                return Err(anyhow::anyhow!(
+                    "get_transaction_block({tx_id_base58}) failed: {status}"
+                ));
+            }
+        };
+
+        match resp.result {
+            Some(get_transaction_block_response::Result::Block(b)) => {
+                let block_id = pb_hash_to_base58(b.block_id, "block_id")?;
+                let parent = pb_hash_to_base58(b.parent, "parent")?;
+                Ok(TransactionBlockResult::InBlock {
+                    block_id,
+                    height: b.height,
+                    parent,
+                    timestamp: b.timestamp,
+                })
+            }
+            Some(get_transaction_block_response::Result::Pending(_)) => {
+                Ok(TransactionBlockResult::Pending)
+            }
+            Some(get_transaction_block_response::Result::Error(err)) => Err(anyhow::anyhow!(
+                "get_transaction_block returned error: {}",
+                err.message
+            )),
+            None => Err(anyhow::anyhow!(
+                "get_transaction_block returned an empty response"
+            )),
+        }
+    }
+
+    /// Fetch the inputs/outputs/fees for a given tx.
+    ///
+    /// Same `NotFound`/`Pending`/`Found` semantics as `get_transaction_block`.
+    pub async fn get_transaction_details(
+        &mut self,
+        tx_id_base58: &str,
+    ) -> Result<TransactionDetailsResult> {
+        use nockapp_grpc::pb::common::v1::Base58Hash;
+        use nockapp_grpc::pb::public::v2::{
+            get_transaction_details_response, transaction_details, transaction_output,
+            GetTransactionDetailsRequest,
+        };
+
+        let req = GetTransactionDetailsRequest {
+            tx_id: Some(Base58Hash {
+                hash: tx_id_base58.to_string(),
+            }),
+        };
+
+        let resp = match self.block.get_transaction_details(req).await {
+            Ok(r) => r.into_inner(),
+            Err(status)
+                if status.code() == tonic::Code::NotFound
+                    || status.code() == tonic::Code::InvalidArgument =>
+            {
+                return Ok(TransactionDetailsResult::NotFound);
+            }
+            Err(status) => {
+                return Err(anyhow::anyhow!(
+                    "get_transaction_details({tx_id_base58}) failed: {status}"
+                ));
+            }
+        };
+
+        let pb = match resp.result {
+            Some(get_transaction_details_response::Result::Details(d)) => d,
+            Some(get_transaction_details_response::Result::Pending(_)) => {
+                return Ok(TransactionDetailsResult::Pending);
+            }
+            Some(get_transaction_details_response::Result::Error(err)) => {
+                return Err(anyhow::anyhow!(
+                    "get_transaction_details returned error: {}",
+                    err.message
+                ));
+            }
+            None => {
+                return Err(anyhow::anyhow!(
+                    "get_transaction_details returned an empty response"
+                ));
+            }
+        };
+
+        let block_id = pb_hash_to_base58(pb.block_id, "block_id")?;
+        let parent = pb_hash_to_base58(pb.parent, "parent")?;
+        let total_input = pb.total_input.map(|n| n.value).unwrap_or(0);
+        let total_output = pb
+            .total_output_required
+            .map(|transaction_details::TotalOutputRequired::TotalOutput(n)| n.value);
+        let fee = pb
+            .fee_required
+            .map(|transaction_details::FeeRequired::Fee(n)| n.value);
+
+        let inputs = pb
+            .inputs
+            .into_iter()
+            .map(|i| TxInput {
+                note_name_b58: i.note_name_b58,
+                amount: i.amount.map(|n| n.value).unwrap_or(0),
+                source_tx_id: i.source_tx_id,
+                coinbase: i.coinbase,
+            })
+            .collect();
+
+        let outputs = pb
+            .outputs
+            .into_iter()
+            .map(|o| TxOutput {
+                note_name_b58: o.note_name_b58,
+                amount: o
+                    .amount_required
+                    .map(|transaction_output::AmountRequired::Amount(n)| n.value),
+                lock_summary: o.lock_summary,
+            })
+            .collect();
+
+        Ok(TransactionDetailsResult::Found(TransactionDetails {
+            tx_id: pb.tx_id,
+            block_id,
+            height: pb.height,
+            timestamp: pb.timestamp,
+            version: pb.version,
+            size_bytes: pb.size_bytes,
+            total_input,
+            total_output,
+            fee,
+            inputs,
+            outputs,
+            parent,
+        }))
     }
 
     /// Get balance by full SchnorrPubkey address (base58, 97 bytes decoded).
@@ -238,6 +421,98 @@ impl ChainClient {
     pub fn config(&self) -> &ChainConfig {
         &self.config
     }
+}
+
+// ---------------------------------------------------------------------------
+// Block-explorer result types
+// ---------------------------------------------------------------------------
+
+/// Result of `get_transaction_block`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransactionBlockResult {
+    /// Tx is included in a confirmed block.
+    InBlock {
+        block_id: String,
+        height: u64,
+        parent: String,
+        timestamp: u64,
+    },
+    /// Tx is in the mempool but not yet in a block.
+    Pending,
+    /// Node has no record of this tx.
+    NotFound,
+}
+
+/// Result of `get_transaction_details`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransactionDetailsResult {
+    Found(TransactionDetails),
+    Pending,
+    NotFound,
+}
+
+/// Inputs/outputs/fees for a confirmed tx.
+///
+/// Mirrors `nockapp_grpc::pb::public::v2::TransactionDetails` with the
+/// required-oneof fields lifted into plain `Option`s and `Hash` values
+/// rendered as base58 strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransactionDetails {
+    pub tx_id: String,
+    pub block_id: String,
+    pub height: u64,
+    pub timestamp: u64,
+    pub version: u64,
+    pub size_bytes: u64,
+    pub total_input: u64,
+    /// `None` if the proto field was unset (proto3 optional semantics).
+    pub total_output: Option<u64>,
+    /// `None` if the proto field was unset.
+    pub fee: Option<u64>,
+    pub inputs: Vec<TxInput>,
+    pub outputs: Vec<TxOutput>,
+    pub parent: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TxInput {
+    pub note_name_b58: String,
+    pub amount: u64,
+    pub source_tx_id: String,
+    pub coinbase: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TxOutput {
+    pub note_name_b58: String,
+    /// `None` if the proto field was unset.
+    pub amount: Option<u64>,
+    pub lock_summary: String,
+}
+
+// Convert a proto `common::v1::Hash` (5-belt limbs) to its base58 string form.
+// Returns an error if the hash field was unset or any belt was missing.
+fn pb_hash_to_base58(
+    hash: Option<nockapp_grpc::pb::common::v1::Hash>,
+    field: &str,
+) -> Result<String> {
+    let h = hash.ok_or_else(|| anyhow::anyhow!("{field} hash field was unset"))?;
+    let belts = [
+        h.belt_1.ok_or_else(|| anyhow::anyhow!("{field}.belt_1 unset"))?.value,
+        h.belt_2.ok_or_else(|| anyhow::anyhow!("{field}.belt_2 unset"))?.value,
+        h.belt_3.ok_or_else(|| anyhow::anyhow!("{field}.belt_3 unset"))?.value,
+        h.belt_4.ok_or_else(|| anyhow::anyhow!("{field}.belt_4 unset"))?.value,
+        h.belt_5.ok_or_else(|| anyhow::anyhow!("{field}.belt_5 unset"))?.value,
+    ];
+    use nockchain_math::belt::Belt;
+    let chain_hash = ChainHash([
+        Belt(belts[0]),
+        Belt(belts[1]),
+        Belt(belts[2]),
+        Belt(belts[3]),
+        Belt(belts[4]),
+    ]);
+    Ok(chain_hash.to_base58())
 }
 
 // ---------------------------------------------------------------------------

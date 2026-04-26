@@ -109,7 +109,7 @@ For contributors who want a local nockchain checkout and bare-metal builds.
 
 ```
 <wherever>/
-├── nockchain/                     # https://github.com/zorp-corp/nockchain
+├── nockchain/                     # https://github.com/nockchain/nockchain
 └── vesl-core/                     # this repo (workspace root)
 ```
 
@@ -156,9 +156,42 @@ Vesl supports three settlement modes. Set via `--settlement-mode`, `VESL_SETTLEM
 Precedence: CLI flag > environment variable > `vesl.toml` > mode defaults. Passing `--chain-endpoint` or `--submit` without an explicit mode infers `fakenet`.
 
 
+## Verify a transaction
+
+Once a tx has been submitted to Nockchain, you can fetch a chain-attested receipt for it:
+
+```
+GET /tx/:tx_id
+```
+
+Returns JSON shaped like:
+
+```json
+{
+  "tx_hash": "...",
+  "accepted": true,
+  "block_id": "...",
+  "block_height": 42,
+  "timestamp": 1714000000,
+  "fee": 256,
+  "amount_total": 1000,
+  "inputs":  [ { "note_name": "...", "amount": 1256, "source_tx_id": "...", "coinbase": false } ],
+  "outputs": [ { "note_name": "...", "amount": 1000, "lock_summary": "P2PKH:9yPe..." } ],
+  "primary_lock_summary": "P2PKH:9yPe..."
+}
+```
+
+**No `sender` and no `receiver`.** Nockchain is a UTXO chain — there is no single sender or receiver field on a transaction. There are notes being spent (`inputs`) and notes being created (`outputs`); each output carries a `lock_summary` string that names the spend condition. `primary_lock_summary` is a convenience field, populated only when a tx has exactly one output. Multi-output txs must read `outputs` directly.
+
+The "proof" here is chain attestation: the node confirms the tx is in a block (or in mempool, with `accepted: false`). For an offline-verifiable Merkle commitment over a `(tx_hash, ...)` tuple, use the Mint/Guard primitives instead.
+
+Available in `fakenet` and `dumbnet` modes. In `local` mode the endpoint returns `400 Bad Request` — there is no chain to query.
+
+The same data is available from Rust via `vesl_core::fetch_receipt(client, tx_hash)` for NockApps that embed the SDK without running the hull.
+
 ## Standalone Crates
 
-These work independently of Vesl. Any NockApp can use them. Built on primitives from the [nockchain](https://github.com/zorp-corp/nockchain) monorepo — packaged as standalone libraries with documentation.
+These work independently of Vesl. Any NockApp can use them. Built on primitives from the [nockchain](https://github.com/nockchain/nockchain) monorepo — packaged as standalone libraries with documentation.
 
 **[nock-noun-rs](crates/nock-noun-rs/)** — Build Nock nouns from Rust without reading 57K lines of wallet code. NockStack helpers, cord/tag/loobean builders, jam/cue round-trips. Handles the footguns (loobeans are inverted, cords aren't strings, lists are null-terminated) so you don't have to.
 

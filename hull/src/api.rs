@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use vesl_core::{format_tip5, MerkleTree};
+use vesl_core::{
+    fetch_receipt, format_tip5, ChainClient, MerkleTree, SettlementMode, TxReceipt, VerifyTxError,
+};
 
 use crate::config::SettlementConfig;
 use crate::verify::field_to_leaf_bytes;
@@ -256,6 +258,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/commit", post(commit_handler))
         .route("/settle", post(settle_handler))
         .route("/verify", post(verify_handler))
+        .route("/tx/{tx_id}", get(verify_tx_handler))
         .layer(
             tower::ServiceBuilder::new()
                 .layer(axum::error_handling::HandleErrorLayer::new(|_: tower::BoxError| async {
@@ -485,6 +488,66 @@ async fn verify_handler(
     }))
 }
 
+/// GET /tx/:tx_id — fetch a chain-attested receipt for a previously submitted tx.
+///
+/// Requires a chain-connected settlement mode (fakenet or dumbnet). In local
+/// mode, returns 400 with a clear error.
+async fn verify_tx_handler(
+    State(state): State<SharedState>,
+    axum::extract::Path(tx_id): axum::extract::Path<String>,
+) -> Result<Json<TxReceipt>, (StatusCode, Json<ErrorBody>)> {
+    let chain_config = {
+        let st = state.lock().await;
+        if st.settlement.mode == SettlementMode::Local {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    error: "verify-tx requires a chain-connected settlement mode \
+                            (fakenet or dumbnet)"
+                        .into(),
+                }),
+            ));
+        }
+        st.settlement.chain_config().ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    error: "settlement mode has no chain endpoint configured".into(),
+                }),
+            )
+        })?
+    };
+
+    let mut client = ChainClient::connect(chain_config).await.map_err(|e| {
+        eprintln!("verify-tx: failed to connect to chain: {e}");
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorBody {
+                error: "failed to reach chain endpoint".into(),
+            }),
+        )
+    })?;
+
+    match fetch_receipt(&mut client, &tx_id).await {
+        Ok(receipt) => Ok(Json(receipt)),
+        Err(VerifyTxError::NotFound(_)) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: format!("transaction `{tx_id}` not found on chain"),
+            }),
+        )),
+        Err(VerifyTxError::Chain(e)) => {
+            eprintln!("verify-tx: chain RPC error for {tx_id}: {e}");
+            Err((
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorBody {
+                    error: "chain RPC error".into(),
+                }),
+            ))
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Server entry point
 // ---------------------------------------------------------------------------
@@ -497,11 +560,12 @@ pub async fn serve(state: SharedState, port: u16, bind_addr: &str) -> Result<(),
         eprintln!("WARNING: HULL_API_KEY not set -- API endpoints are unauthenticated");
     }
     println!("Hull API listening on http://{bind_addr}:{port}");
-    println!("  POST /commit  -- commit key-value fields");
-    println!("  POST /settle  -- settle a note");
-    println!("  POST /verify  -- verify a field commitment");
-    println!("  GET  /status  -- current state");
-    println!("  GET  /health  -- liveness check");
+    println!("  POST /commit    -- commit key-value fields");
+    println!("  POST /settle    -- settle a note");
+    println!("  POST /verify    -- verify a field commitment");
+    println!("  GET  /tx/:tx_id -- fetch chain-attested receipt for a submitted tx");
+    println!("  GET  /status    -- current state");
+    println!("  GET  /health    -- liveness check");
     axum::serve(listener, app).await?;
     Ok(())
 }

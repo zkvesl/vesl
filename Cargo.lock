@@ -3721,11 +3721,13 @@ dependencies = [
  "anyhow",
  "nockapp",
  "nockapp-grpc",
+ "nockchain-math",
  "nockchain-tip5-rs",
  "nockchain-types",
  "nockvm",
  "noun-serde",
  "tokio",
+ "tonic 0.14.5",
 ]
 
 [[package]]

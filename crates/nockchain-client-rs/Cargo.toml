@@ -11,6 +11,7 @@ nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
 nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }
 nockapp-grpc = { path = "../../../nockchain/crates/nockapp-grpc" }
 nockchain-types = { path = "../../../nockchain/crates/nockchain-types" }
+nockchain-math = { path = "../../../nockchain/crates/nockchain-math" }
 noun-serde = { path = "../../../nockchain/crates/noun-serde" }
 
 # Vesl extracted crates
@@ -19,3 +20,4 @@ nockchain-tip5-rs = { path = "../nockchain-tip5-rs" }
 # Standard deps
 anyhow = "1.0"
 tokio = { version = "1", features = ["time"] }
+tonic = { version = "0.14.0", features = ["tls-webpki-roots"] }

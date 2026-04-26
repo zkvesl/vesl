@@ -41,7 +41,10 @@ pub mod types;
 pub mod wallet;
 
 // Re-export the main types at crate root for convenience.
-pub use chain::{ChainClient, ChainConfig};
+pub use chain::{
+    ChainClient, ChainConfig, TransactionBlockResult, TransactionDetails,
+    TransactionDetailsResult, TxInput, TxOutput,
+};
 pub use note_data::{
     find_entry, find_hash_entry, find_opaque_bytes_entry, find_u64_entry, jam_opaque_bytes_entry,
     jam_tip5_entry, jam_u64_entry,

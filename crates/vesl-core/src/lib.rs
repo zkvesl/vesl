@@ -20,6 +20,7 @@ pub mod forge;
 pub mod graft_pokes;
 pub mod signing;
 pub mod types;
+pub mod verify_tx;
 
 // Top-level re-exports so callers can write:
 //   use vesl_core::{Mint, Guard, Tip5Hash, ProofNode};
@@ -43,6 +44,7 @@ pub use mint::MintError;
 pub use settle::RagVerifier;
 pub use signing::{SigningError, derive_pubkey, pubkey_hash, sign, key_from_seed_phrase};
 pub use config::{SettlementMode, SettlementConfig, SettlementToml};
+pub use verify_tx::{fetch_receipt, TxInputView, TxOutputView, TxReceipt, VerifyTxError};
 
 // Graft poke builders — used by callers that compose grafted kernels via
 // `graft-inject` (in vesl-nockup). One submodule per primitive.
