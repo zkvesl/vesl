@@ -270,24 +270,75 @@ Version bumps to this schema append fields, never reshape existing ones.
 | Banner `::  graft-inject:<name>:<marker>:begin` already present | skip that graft-marker pair; log `skipped` |
 | Body contains tabs (mixed indentation) | injection proceeds — `hoonc` may fail downstream |
 
-## Reserved: `[graft.gates]` extension
+## `[graft.gates]` — catalog gate selection
 
-EXPANSION's gate catalog will introduce a per-graft gate-binding table.
-**Reserved; not implemented by graft-inject until the gate catalog
-ships.** Documented here so gate-graft authors can write to a stable
-target. Gates are family 2 in the lattice — a library of parameterized
-decision functions, not grafts in their own right.
+EXPANSION Phase 01 (branch `parametize_2`) implements named-gate
+selection on top of `settle-graft`'s parameterized verify-gate. Gates
+are family 2 in the lattice — a library of parameterized decision
+functions shipped from `vesl-core/protocol/lib/vesl-gates.hoon`, not
+grafts in their own right.
 
 ```toml
 [graft.gates]
-gate       = "rag-verifier"          # single named gate from the catalog
-gate-chain = ["bind-note-id", "rag"] # composition of named gates, applied left-to-right
+gate       = "sig-verify-ed25519"                  # single named gate from the catalog
+gate-chain = ["sig-verify-ed25519", "manifest-verify"]  # AND-fold composition
 ```
 
-When implemented, the composer will splice the named gate's body into
-the `settle-graft` poke body at inject time, replacing the default
-hash-gate. `gate` and `gate-chain` are mutually exclusive — set one or
-neither.
+`gate` and `gate-chain` are mutually exclusive — set one or neither.
+When set, the composer rewrites the manifest's `[graft.blocks.poke]`
+body: every default 4-line `=/  hash-gate=verify-gate ... =((hash-leaf
+;;(@ data)) expected-root)` block is replaced with a binding to the
+selected gate, and `[graft.blocks.imports]` gains a `/+  *vesl-gates`
+line if it wasn't there already. The manifest itself is left on disk
+unchanged; the rewrite runs in memory at inject time.
+
+`gate-chain` composes AND-only in v1 (per `vesl-nockup/.dev/OVERVIEW.md`
+§Out-of-scope). Each named gate runs against the same `(note-id, data,
+expected-root)` triple; the chain returns `%.y` iff every gate does.
+
+### Catalog allowlist
+
+`graft-inject` validates gate names against a hardcoded allowlist of
+catalog-shipped gates. Tier 1a (currently shipping):
+
+- `sig-verify-ed25519`
+- `manifest-verify`
+- `set-membership-verify`
+
+Tier 1b additions extend the allowlist as they land. Unknown names hard-
+error at discovery with the offending file path and field path
+(C2 — see `vesl-nockup/.dev/OVERVIEW.md` §Safety contracts).
+
+### Validation rules
+
+| Condition | Behavior |
+|---|---|
+| `gate` and `gate-chain` both set | hard error at discovery |
+| `gate-chain = []` (empty list) | hard error |
+| `gate` or any `gate-chain` entry not matching `^[a-z][a-z0-9-]*$` | hard error |
+| `gate` or `gate-chain` entry not in the catalog allowlist | hard error |
+| `[graft.gates]` set but the manifest has no `[graft.blocks.poke]` | hard error |
+| `[graft.gates]` set but the poke body lacks the default hash-gate block | hard error (the manifest already hand-wrote a custom gate; catalog selection is a no-op or contradicts it — surface the conflict instead of silently picking one) |
+
+### Example: settle-graft with ed25519 selection
+
+```toml
+[graft]
+name = "settle-graft"
+version = "0.1.0"
+priority = 10
+
+[graft.gates]
+gate = "sig-verify-ed25519"
+
+# [graft.blocks.imports], [graft.blocks.state], [graft.blocks.cause],
+# [graft.blocks.poke], [graft.blocks.peek] -- as in the stock manifest.
+# The composer rewrites the poke body's three hash-gate blocks to:
+#
+#   =/  hash-gate=verify-gate  sig-verify-ed25519:vesl-gates
+#
+# and prepends `/+  *vesl-gates` to the imports body.
+```
 
 ## Migration: vesl-graft → settle-graft
 
