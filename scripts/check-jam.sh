@@ -112,6 +112,10 @@ if [[ "$status" -ne 0 ]]; then
     echo "A refactor changed kernel bytes. Either: (a) back out the change, or" >&2
     echo "(b) if the change is intentional, update assets/CHECKSUMS.sha256 in a" >&2
     echo "dedicated commit with a reviewer explanation." >&2
+    echo "" >&2
+    echo "If kernel sources are UNMODIFIED, your local hoonc may be stale" >&2
+    echo "relative to NOCK_PIN (rebuild: cd \$NOCK_HOME && make install-hoonc)," >&2
+    echo "or the committed JAMs predate the current NOCK_PIN and need regen." >&2
     exit 1
 fi
 
