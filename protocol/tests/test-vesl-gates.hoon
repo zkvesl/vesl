@@ -241,4 +241,97 @@
         expected-root=(hash-leaf 0xdead.beef)
     ==
 ::
+::  ============================================
+::  TEST: bounded-value-verify
+::  ============================================
+::
+::  Dedicated 4-leaf fixture.  Leaves are jam([value bounds]) atoms,
+::  not raw atoms -- the top-of-file fixture hashes raw atoms and
+::  cannot serve this gate's leaf shape.  Three of the four leaves
+::  carry the same bounds [10, 100] for boundary-value tests; the
+::  fourth carries different bounds as a sibling-only entry.
+::
+=/  bv-bounds=[lo=@ hi=@]      [lo=10 hi=100]
+=/  bv-other=[lo=@ hi=@]       [lo=1 hi=99]
+=/  bv-jam-mid=@               (jam [42 bv-bounds])
+=/  bv-jam-lo=@                (jam [10 bv-bounds])
+=/  bv-jam-hi=@                (jam [100 bv-bounds])
+=/  bv-jam-other=@             (jam [7 bv-other])
+=/  bv-h0                      (hash-leaf bv-jam-mid)
+=/  bv-h1                      (hash-leaf bv-jam-lo)
+=/  bv-h2                      (hash-leaf bv-jam-hi)
+=/  bv-h3                      (hash-leaf bv-jam-other)
+=/  bv-h01                     (hash-pair bv-h0 bv-h1)
+=/  bv-h23                     (hash-pair bv-h2 bv-h3)
+=/  bv-root                    (hash-pair bv-h01 bv-h23)
+::
+=/  bv-proof-mid=(list [hash=@ side=?])
+  ~[[hash=bv-h1 side=%.n] [hash=bv-h23 side=%.n]]
+=/  bv-proof-lo=(list [hash=@ side=?])
+  ~[[hash=bv-h0 side=%.y] [hash=bv-h23 side=%.n]]
+=/  bv-proof-hi=(list [hash=@ side=?])
+  ~[[hash=bv-h3 side=%.n] [hash=bv-h01 side=%.y]]
+::
+::  Positive: 42 in [10, 100] under valid proof
+::
+?>  %-  bounded-value-verify
+    :*  note-id=0
+        data=[value=42 bounds=bv-bounds proof=bv-proof-mid]
+        expected-root=bv-root
+    ==
+::
+::  Positive boundary: lower edge (value == lo)
+::
+?>  %-  bounded-value-verify
+    :*  note-id=0
+        data=[value=10 bounds=bv-bounds proof=bv-proof-lo]
+        expected-root=bv-root
+    ==
+::
+::  Positive boundary: upper edge (value == hi)
+::
+?>  %-  bounded-value-verify
+    :*  note-id=0
+        data=[value=100 bounds=bv-bounds proof=bv-proof-hi]
+        expected-root=bv-root
+    ==
+::
+::  Negative: out-of-range (value=5 < lo=10).  Bounds check
+::  short-circuits before the merkle proof is consulted.
+::
+?<  %-  bounded-value-verify
+    :*  note-id=0
+        data=[value=5 bounds=bv-bounds proof=bv-proof-mid]
+        expected-root=bv-root
+    ==
+::
+::  Negative: tampered bounds.  Caller substitutes [5 50] for the
+::  committed [10 100]; bounds check passes (42 in [5 50]), but
+::  hash-leaf(jam([42 [5 50]])) differs from the committed leaf,
+::  so verify-chunk rejects.
+::
+?<  %-  bounded-value-verify
+    :*  note-id=0
+        data=[value=42 bounds=[lo=5 hi=50] proof=bv-proof-mid]
+        expected-root=bv-root
+    ==
+::
+::  Negative: vacuous bounds (lo > hi).  gte short-circuits %.n
+::  for any value, no special-casing required.
+::
+?<  %-  bounded-value-verify
+    :*  note-id=0
+        data=[value=42 bounds=[lo=100 hi=10] proof=bv-proof-mid]
+        expected-root=bv-root
+    ==
+::
+::  Hostile: data is a bare atom (mule catches the ;; failure)
+::
+?<  (bounded-value-verify note-id=0 data=42 expected-root=bv-root)
+::
+::  Hostile: bounds slot is an atom instead of [lo=@ hi=@]
+::           (well-formed top-level 3-cell, but inner shape wrong)
+::
+?<  (bounded-value-verify note-id=0 data=[1 2 ~] expected-root=bv-root)
+::
 %pass

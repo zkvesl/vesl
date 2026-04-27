@@ -305,6 +305,7 @@ catalog-shipped gates. Tier 1a (currently shipping):
 - `sig-verify-schnorr`
 - `manifest-verify`
 - `set-membership-verify`
+- `bounded-value-verify`
 
 Tier 1b additions extend the allowlist as they land. Unknown names hard-
 error at discovery with the offending file path and field path

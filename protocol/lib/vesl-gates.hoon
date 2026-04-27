@@ -24,9 +24,10 @@
 ::    sig-verify-schnorr       cheetah-curve schnorr signature on attestation data
 ::    manifest-verify          AND-fold of merkle proofs over named fields
 ::    set-membership-verify    leaf-in-merkle-tree membership proof
+::    bounded-value-verify     numeric value falls in committed [lo, hi]
 ::
-::  Tier 1b (future, demand-gated): range-proof-verify, threshold-sig-
-::  verify, merkle-kv-verify, timelock-verify, commit-reveal-verify.
+::  Tier 1b (future, demand-gated): threshold-sig-verify, merkle-kv-
+::  verify, timelock-verify, commit-reveal-verify.
 ::  See vesl-nockup/.dev/01_GATE_CATALOG.md for the rollout schedule.
 ::
 ::  Binding convention: every gate ties payload data back to
@@ -152,6 +153,48 @@
     =/  p=[elem=@ proof=(list [hash=@ side=?])]
       ;;([elem=@ proof=(list [hash=@ side=?])] data)
     (verify-chunk elem.p proof.p expected-root)
+  ?:  ?=(%| -.attempt)  %.n
+  p.attempt
+::
+::  +bounded-value-verify: prove a merkle-committed numeric value
+::  falls in a committed [lo, hi] interval.
+::
+::  Payload  : [value=@ bounds=[lo=@ hi=@] proof=(list [hash=@ side=?])]
+::  Binding  : verify-chunk's leaf is hash-leaf(jam([value bounds])) --
+::             value AND bounds are jammed together so an attacker
+::             cannot substitute their own range.  Without bounds in
+::             the leaf this would degenerate into "claim any range
+::             you like over an attested value."  We pass the raw
+::             jam atom to verify-chunk; verify-chunk applies
+::             hash-leaf internally (per convention shared with
+::             set-membership-verify and manifest-verify).
+::  Use case : age gates, balance ranges, score brackets -- any
+::             "attested numeric value falls in this interval" check.
+::  Stdlib   : gte/lte for the bounds check; jam to canonicalize the
+::             leaf payload before hashing; verify-chunk for the
+::             merkle path.
+::
+::  Note: this is NOT a zero-knowledge proof.  `value` is plaintext
+::  in the payload.  Real ZK range proofs (Bulletproofs, etc.) are
+::  out of scope for the gate catalog -- see EMPIRE track.  The name
+::  is `bounded-value-verify` rather than `range-proof-verify`
+::  precisely because the latter implies ZK semantics this gate does
+::  not provide.
+::
+::  Edge: lo > hi yields a vacuously-false predicate (gte/lte fail
+::  for any value); the gate returns %.n without special-casing.
+::
+++  bounded-value-verify
+  |=  [note-id=@ data=* expected-root=@]
+  ^-  ?
+  =/  attempt
+    %-  mule  |.
+    =/  p=[value=@ bounds=[lo=@ hi=@] proof=(list [hash=@ side=?])]
+      ;;([value=@ bounds=[lo=@ hi=@] proof=(list [hash=@ side=?])] data)
+    ?&  (gte value.p lo.bounds.p)
+        (lte value.p hi.bounds.p)
+        (verify-chunk (jam [value.p bounds.p]) proof.p expected-root)
+    ==
   ?:  ?=(%| -.attempt)  %.n
   p.attempt
 --
