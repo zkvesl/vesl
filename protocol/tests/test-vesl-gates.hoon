@@ -10,10 +10,6 @@
 ::    ?>  pred   asserts pred is %.y (positive case)
 ::    ?<  pred   asserts pred is %.n (negative + hostile cases)
 ::
-::  sig-verify-schnorr is deferred to Tier 1b -- see
-::  vesl-nockup/.dev/01_GATE_CATALOG.md for the rationale (the
-::  cheetah-vs-secp256k1 design needs settling before a Schnorr
-::  gate ships).
 ::
 /+  *vesl-merkle
 /+  *vesl-gates
@@ -169,5 +165,80 @@
 ::  Hostile: data is a 2-tuple (gate expects 3)
 ::
 ?<  (sig-verify-ed25519 note-id=0 data=[1 2] expected-root=ed-root)
+::
+::  ============================================
+::  TEST: sig-verify-schnorr (cheetah)
+::  ============================================
+::
+::  Cheetah schnorr signs from a list of 32-bit-belt limbs (matches
+::  the wallet's belt-schnorr wrapper); verify-side accepts a flat
+::  sig atom packed as (chal << 256) | s.  Pubkey is the ser-a-pt
+::  affine-point serialization (the wallet-export shape).  Each
+::  belt in the sk-list must be < 2^32 (sign asserts this); short
+::  fixtures sit comfortably inside that bound.
+::
+=/  sch-sk-belts=(list belt)  ~[0xabad.f00d 0x0 0x0 0x0 0x0]
+=/  sch-sk=@                  (rep 5 sch-sk-belts)
+=/  sch-pk-pt=a-pt:curve:cheetah
+  (ch-scal:affine:curve:cheetah sch-sk a-gen:curve:cheetah)
+=/  sch-pk=@ux                (ser-a-pt:cheetah sch-pk-pt)
+=/  sch-msg                   'attest: revenue Q3 = $47M'
+=/  sch-digest=noun-digest:tip5
+  (hash-hashable:tip5 leaf+sch-msg)
+=/  sch-cs=[chal=@ux s=@ux]
+  (sign:affine:schnorr:cheetah sch-sk-belts sch-digest)
+=/  sch-sig=@                 (cat 8 s.sch-cs chal.sch-cs)
+=/  sch-root                  (hash-leaf sch-pk)
+::
+::  Positive
+::
+?>  %-  sig-verify-schnorr
+    :*  note-id=0
+        data=[data=sch-msg sig=sch-sig pubkey=sch-pk]
+        expected-root=sch-root
+    ==
+::
+::  Negative: tampered signature (flip 1 bit in the s half)
+::
+?<  %-  sig-verify-schnorr
+    :*  note-id=0
+        data=[data=sch-msg sig=(mix sch-sig 1) pubkey=sch-pk]
+        expected-root=sch-root
+    ==
+::
+::  Negative: wrong pubkey (re-derive from a different sk)
+::
+=/  sch-sk-belts-other=(list belt)  ~[0xdead.beef 0x0 0x0 0x0 0x0]
+=/  sch-sk-other=@                  (rep 5 sch-sk-belts-other)
+=/  sch-pk-pt-other=a-pt:curve:cheetah
+  (ch-scal:affine:curve:cheetah sch-sk-other a-gen:curve:cheetah)
+=/  sch-pk-other=@ux  (ser-a-pt:cheetah sch-pk-pt-other)
+?<  %-  sig-verify-schnorr
+    :*  note-id=0
+        data=[data=sch-msg sig=sch-sig pubkey=sch-pk-other]
+        expected-root=sch-root
+    ==
+::
+::  Negative: root commits to a different pubkey (sig valid, root
+::  binding fails)
+::
+?<  %-  sig-verify-schnorr
+    :*  note-id=0
+        data=[data=sch-msg sig=sch-sig pubkey=sch-pk]
+        expected-root=(hash-leaf sch-pk-other)
+    ==
+::
+::  Hostile: data is a bare atom (not a 3-tuple)
+::
+?<  (sig-verify-schnorr note-id=0 data=0xdead expected-root=sch-root)
+::
+::  Hostile: pubkey atom is not a valid serialized affine point
+::           (de-a-pt's in-g:affine:curve check fires inside the mule)
+::
+?<  %-  sig-verify-schnorr
+    :*  note-id=0
+        data=[data=sch-msg sig=sch-sig pubkey=0xdead.beef]
+        expected-root=(hash-leaf 0xdead.beef)
+    ==
 ::
 %pass

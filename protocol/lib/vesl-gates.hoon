@@ -21,16 +21,13 @@
 ::
 ::  Tier 1a (this file):
 ::    sig-verify-ed25519       ed25519 signature on attestation data
+::    sig-verify-schnorr       cheetah-curve schnorr signature on attestation data
 ::    manifest-verify          AND-fold of merkle proofs over named fields
 ::    set-membership-verify    leaf-in-merkle-tree membership proof
 ::
-::  Tier 1b (future, demand-gated): sig-verify-schnorr, range-proof-
-::  verify, threshold-sig-verify, merkle-kv-verify, timelock-verify,
-::  commit-reveal-verify.  See vesl-nockup/.dev/01_GATE_CATALOG.md
-::  for the rollout schedule.  Schnorr in particular needs cheetah-
-::  curve typing settled (Nockchain's on-chain schnorr is
-::  `belt-schnorr:cheetah`, not the BIP-340 secp256k1 form in zose),
-::  so its payload shape and stdlib selection are deferred.
+::  Tier 1b (future, demand-gated): range-proof-verify, threshold-sig-
+::  verify, merkle-kv-verify, timelock-verify, commit-reveal-verify.
+::  See vesl-nockup/.dev/01_GATE_CATALOG.md for the rollout schedule.
 ::
 ::  Binding convention: every gate ties payload data back to
 ::  `expected-root` via hash-leaf or verify-chunk.  Without that
@@ -61,6 +58,44 @@
       ;;([data=@ sig=@ pubkey=@] data)
     ?&  =((hash-leaf pubkey.p) expected-root)
         (veri:ed:crypto sig.p data.p pubkey.p)
+    ==
+  ?:  ?=(%| -.attempt)  %.n
+  p.attempt
+::
+::  +sig-verify-schnorr: cheetah-curve schnorr signature on attestation data.
+::
+::  Payload  : [data=@ sig=@ pubkey=@]
+::             - data:    raw attested bytes (any size)
+::             - sig:     (chal << 256) | s; both halves are 32 bytes,
+::                        bounded by g-order:curve:cheetah
+::             - pubkey:  serialized affine point via ser-a-pt:cheetah
+::                        (the wallet-export shape)
+::  Binding  : expected-root = hash-leaf(pubkey)
+::             same convention as sig-verify-ed25519: the hull's
+::             commitment IS the serialized pubkey atom.
+::  Use case : on-chain Nockchain attestations, intent signing, any
+::             flow whose verification will eventually be cross-checked
+::             against an on-chain belt-schnorr signature.
+::  Stdlib   : verify:affine:schnorr:cheetah from /common/ztd/three
+::             (transitively reachable via /common/zose).  Returns %.n
+::             on out-of-range chal/sig (no crash).  de-a-pt asserts
+::             the recovered point is on-curve via in-g:affine:curve;
+::             a malformed pubkey atom triggers that ?> and the outer
+::             mule converts it to %.n per C1.
+::
+++  sig-verify-schnorr
+  |=  [note-id=@ data=* expected-root=@]
+  ^-  ?
+  =/  attempt
+    %-  mule  |.
+    =/  p=[data=@ sig=@ pubkey=@]
+      ;;([data=@ sig=@ pubkey=@] data)
+    ?&  =((hash-leaf pubkey.p) expected-root)
+        =/  pk=a-pt:curve:cheetah  (de-a-pt:cheetah pubkey.p)
+        =/  m=noun-digest:tip5     (hash-hashable:tip5 leaf+data.p)
+        =/  chal=@                 (rsh 8 sig.p)
+        =/  s=@                    (end 8 sig.p)
+        (verify:affine:schnorr:cheetah pk m chal s)
     ==
   ?:  ?=(%| -.attempt)  %.n
   p.attempt

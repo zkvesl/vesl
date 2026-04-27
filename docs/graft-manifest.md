@@ -302,6 +302,7 @@ expected-root)` triple; the chain returns `%.y` iff every gate does.
 catalog-shipped gates. Tier 1a (currently shipping):
 
 - `sig-verify-ed25519`
+- `sig-verify-schnorr`
 - `manifest-verify`
 - `set-membership-verify`
 
