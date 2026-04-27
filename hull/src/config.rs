@@ -10,7 +10,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 pub use vesl_core::config::{
-    SettlementConfig, SettlementMode, SettlementToml,
+    SettlementCliOverrides, SettlementConfig, SettlementMode, SettlementToml,
 };
 
 use crate::signing;
@@ -64,24 +64,12 @@ pub fn load_config(path: &Path) -> HullConfig {
 /// Resolve settlement config with hull defaults (demo key for fakenet).
 /// Surfaces misconfiguration as a typed error for main.rs (L-14).
 pub fn resolve_with_demo_key_checked(
-    cli_mode: Option<SettlementMode>,
-    cli_chain_endpoint: Option<String>,
-    cli_submit: bool,
-    cli_tx_fee: Option<u64>,
-    cli_coinbase_timelock_min: Option<u64>,
-    cli_accept_timeout: Option<u64>,
-    cli_seed_phrase: Option<String>,
+    overrides: &SettlementCliOverrides,
     toml: &HullConfig,
 ) -> Result<SettlementConfig, String> {
     let settlement_toml = SettlementToml::from(toml);
     SettlementConfig::resolve_checked(
-        cli_mode,
-        cli_chain_endpoint,
-        cli_submit,
-        cli_tx_fee,
-        cli_coinbase_timelock_min,
-        cli_accept_timeout,
-        cli_seed_phrase,
+        overrides,
         &settlement_toml,
         Some(signing::demo_signing_key()),
     )
@@ -98,7 +86,7 @@ mod tests {
     #[test]
     fn default_is_local() {
         let toml = HullConfig::default();
-        let cfg = resolve_with_demo_key_checked(None, None, false, None, None, None, None, &toml).unwrap();
+        let cfg = resolve_with_demo_key_checked(&SettlementCliOverrides::default(), &toml).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Local);
         assert!(cfg.chain_endpoint.is_none());
         assert!(cfg.signing_key.is_none());
@@ -109,13 +97,10 @@ mod tests {
     fn chain_endpoint_infers_fakenet() {
         let toml = HullConfig::default();
         let cfg = resolve_with_demo_key_checked(
-            None,
-            Some("http://localhost:9090".into()),
-            false,
-            None,
-            None,
-            None,
-            None,
+            &SettlementCliOverrides {
+                chain_endpoint: Some("http://localhost:9090".into()),
+                ..Default::default()
+            },
             &toml,
         ).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Fakenet);
@@ -127,13 +112,12 @@ mod tests {
     fn explicit_local_ignores_chain_endpoint() {
         let toml = HullConfig::default();
         let cfg = resolve_with_demo_key_checked(
-            Some(SettlementMode::Local),
-            Some("http://localhost:9090".into()),
-            true,
-            None,
-            None,
-            None,
-            None,
+            &SettlementCliOverrides {
+                mode: Some(SettlementMode::Local),
+                chain_endpoint: Some("http://localhost:9090".into()),
+                submit: true,
+                ..Default::default()
+            },
             &toml,
         ).unwrap();
         assert_eq!(cfg.mode, SettlementMode::Local);
@@ -145,13 +129,7 @@ mod tests {
     fn fakenet_defaults() {
         let toml = HullConfig::default();
         let cfg = resolve_with_demo_key_checked(
-            Some(SettlementMode::Fakenet),
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
+            &SettlementCliOverrides { mode: Some(SettlementMode::Fakenet), ..Default::default() },
             &toml,
         ).unwrap();
         assert_eq!(cfg.chain_endpoint.as_deref(), Some("http://localhost:9090"));
@@ -168,13 +146,12 @@ mod tests {
             ..Default::default()
         };
         let cfg = resolve_with_demo_key_checked(
-            Some(SettlementMode::Fakenet),
-            Some("http://cli:9090".into()),
-            false,
-            Some(7000),
-            None,
-            None,
-            None,
+            &SettlementCliOverrides {
+                mode: Some(SettlementMode::Fakenet),
+                chain_endpoint: Some("http://cli:9090".into()),
+                tx_fee: Some(7000),
+                ..Default::default()
+            },
             &toml,
         ).unwrap();
         assert_eq!(cfg.tx_fee, 7000);

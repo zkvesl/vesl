@@ -103,13 +103,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Resolve settlement config (L-14: surface errors, don't panic) ---
     let settlement = config::resolve_with_demo_key_checked(
-        cli.settlement_mode,
-        cli.chain_endpoint.clone(),
-        cli.submit,
-        cli.tx_fee,
-        cli.coinbase_timelock_min,
-        cli.accept_timeout,
-        seed_phrase,
+        &config::SettlementCliOverrides {
+            mode: cli.settlement_mode,
+            chain_endpoint: cli.chain_endpoint.clone(),
+            submit: cli.submit,
+            tx_fee: cli.tx_fee,
+            coinbase_timelock_min: cli.coinbase_timelock_min,
+            accept_timeout: cli.accept_timeout,
+            seed_phrase,
+        },
         &toml_cfg,
     )
     .map_err(|e| {
