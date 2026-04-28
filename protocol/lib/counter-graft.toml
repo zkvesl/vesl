@@ -1,0 +1,73 @@
+# counter-graft manifest — named counters (sequence numbers, nonces).
+#
+# Priority 60, second graft in the 50–99 state-graft band, sitting
+# directly above kv-graft. `after = ["kv-graft"]` keeps the declared
+# state-band ordering explicit.
+#
+# Three poke arms:
+#   %counter-increment — init-to-1 on unset; saturate at 2^64-1 so
+#                        Rust u64 callers don't encounter values they
+#                        can't represent. Saturation surfaces as
+#                        %counter-error 'saturated'; counter is
+#                        unchanged.
+#   %counter-reset     — init-to-0 on unset; overwrites to 0 otherwise.
+#                        Idempotent.
+#   %counter-set       — overwrite the named counter to an arbitrary
+#                        value (administrative override; reset is the
+#                        zero-only special case).
+#
+# Peek path: [%counter-value name=@t] returns the stored @ud or ~.
+#
+# No C1 mule-wrap site: name and value arrive as typed atoms in the
+# cause cell — no `cue` of caller-supplied bytes inside the poke body.
+
+[graft]
+name     = "counter-graft"
+version  = "0.1.0"
+priority = 60
+after    = ["kv-graft"]
+
+[graft.blocks.imports]
+sentinel = "*counter-graft"
+body     = """
+/+  *counter-graft"""
+
+[graft.blocks.state]
+sentinel = "counter=counter-state"
+body     = "counter=counter-state"
+
+[graft.blocks.cause]
+sentinel = "counter-cause"
+body     = "counter-cause"
+
+[graft.blocks.poke]
+sentinel = "%counter-increment"
+body     = """
+::
+  %counter-increment
+=/  lc=counter-cause  [%counter-increment name.u.act]
+=/  [efx=(list counter-effect) new-counter=counter-state]
+  (counter-poke counter.state lc)
+:_  state(counter new-counter)
+^-  (list effect)
+efx
+::
+  %counter-reset
+=/  lc=counter-cause  [%counter-reset name.u.act]
+=/  [efx=(list counter-effect) new-counter=counter-state]
+  (counter-poke counter.state lc)
+:_  state(counter new-counter)
+^-  (list effect)
+efx
+::
+  %counter-set
+=/  lc=counter-cause  [%counter-set name.u.act value.u.act]
+=/  [efx=(list counter-effect) new-counter=counter-state]
+  (counter-poke counter.state lc)
+:_  state(counter new-counter)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "counter-peek"
+body     = "(counter-peek counter.state path)"

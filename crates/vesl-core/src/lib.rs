@@ -62,3 +62,14 @@ pub use graft_pokes::settle::{
 pub use graft_pokes::mint::build_mint_commit_poke;
 pub use graft_pokes::guard::{build_guard_register_poke, build_guard_check_poke};
 pub use graft_pokes::forge::build_forge_prove_poke;
+pub use graft_pokes::kv::{build_kv_set_poke, build_kv_delete_poke};
+pub use graft_pokes::counter::{
+    build_counter_increment_poke, build_counter_reset_poke, build_counter_set_poke,
+};
+pub use graft_pokes::queue::{
+    build_queue_clear_poke, build_queue_pop_poke, build_queue_push_poke,
+};
+pub use graft_pokes::rbac::{build_rbac_grant_poke, build_rbac_revoke_poke};
+pub use graft_pokes::registry::{
+    build_registry_del_poke, build_registry_put_poke, build_registry_update_poke,
+};

@@ -1,0 +1,62 @@
+# kv-graft manifest — simple key-value store (loose semantics).
+#
+# Priority 50 — first graft in the 50–99 state-graft band, sitting
+# above the commitment grafts (10–40) and below counter/queue/rbac/
+# registry. `after = ["forge-graft"]` keeps the declared ordering
+# explicit at the top of the state band; injection order is already
+# priority-driven.
+#
+# Two poke arms:
+#   %kv-set    — set or overwrite key=@t -> value=@ (loose semantics).
+#                Errors only on capacity exhaustion.
+#   %kv-delete — remove key. Idempotent: missing keys are a noop and
+#                still emit %kv-deleted. Strict-delete callers should
+#                use registry-graft instead.
+#
+# Peek path: [%kv-value key=@t] returns the stored value or ~.
+#
+# No C1 mule-wrap site: keys/values arrive as typed atoms in the cause
+# cell — no `cue` of caller-supplied bytes inside the poke body.
+
+[graft]
+name     = "kv-graft"
+version  = "0.1.0"
+priority = 50
+after    = ["forge-graft"]
+
+[graft.blocks.imports]
+sentinel = "*kv-graft"
+body     = """
+/+  *kv-graft"""
+
+[graft.blocks.state]
+sentinel = "kv=kv-state"
+body     = "kv=kv-state"
+
+[graft.blocks.cause]
+sentinel = "kv-cause"
+body     = "kv-cause"
+
+[graft.blocks.poke]
+sentinel = "%kv-set"
+body     = """
+::
+  %kv-set
+=/  lc=kv-cause  [%kv-set key.u.act value.u.act]
+=/  [efx=(list kv-effect) new-kv=kv-state]
+  (kv-poke kv.state lc)
+:_  state(kv new-kv)
+^-  (list effect)
+efx
+::
+  %kv-delete
+=/  lc=kv-cause  [%kv-delete key.u.act]
+=/  [efx=(list kv-effect) new-kv=kv-state]
+  (kv-poke kv.state lc)
+:_  state(kv new-kv)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "kv-peek"
+body     = "(kv-peek kv.state path)"

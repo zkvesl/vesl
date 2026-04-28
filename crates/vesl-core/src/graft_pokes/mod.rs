@@ -14,3 +14,8 @@ pub mod settle;
 pub mod mint;
 pub mod guard;
 pub mod forge;
+pub mod kv;
+pub mod counter;
+pub mod queue;
+pub mod rbac;
+pub mod registry;

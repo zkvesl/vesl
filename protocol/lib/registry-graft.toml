@@ -1,0 +1,72 @@
+# registry-graft manifest — strict structured registry.
+#
+# Priority 90, last graft in the 50–99 state-graft band. Heaviest
+# C1 surface of Phase 02 — both put and update cue caller-supplied
+# record bytes inside the poke. `after = ["rbac-graft"]` keeps
+# state-band ordering explicit.
+#
+# Three poke arms (strict semantics across all three):
+#   %registry-put    — create-only. Existing key → %registry-error.
+#                      Cue's record bytes under a mule guard.
+#   %registry-update — modify-only. Missing key → %registry-error.
+#                      Surfaces old + new record in the effect so
+#                      audit-style callers skip a peek round-trip.
+#                      Cue's record bytes under a mule guard.
+#   %registry-del    — strict remove. Missing key → %registry-error.
+#
+# Peek path: [%registry-entry key=@] returns the stored record or ~.
+#
+# This is the *strict* counterpart to kv-graft. Loose-store callers
+# (overwrite-on-set, noop-on-missing-delete, atom values) use
+# kv-graft. Pick by stance.
+
+[graft]
+name     = "registry-graft"
+version  = "0.1.0"
+priority = 90
+after    = ["rbac-graft"]
+
+[graft.blocks.imports]
+sentinel = "*registry-graft"
+body     = """
+/+  *registry-graft"""
+
+[graft.blocks.state]
+sentinel = "registry=registry-state"
+body     = "registry=registry-state"
+
+[graft.blocks.cause]
+sentinel = "registry-cause"
+body     = "registry-cause"
+
+[graft.blocks.poke]
+sentinel = "%registry-put"
+body     = """
+::
+  %registry-put
+=/  lc=registry-cause  [%registry-put key.u.act payload.u.act]
+=/  [efx=(list registry-effect) new-registry=registry-state]
+  (registry-poke registry.state lc)
+:_  state(registry new-registry)
+^-  (list effect)
+efx
+::
+  %registry-update
+=/  lc=registry-cause  [%registry-update key.u.act payload.u.act]
+=/  [efx=(list registry-effect) new-registry=registry-state]
+  (registry-poke registry.state lc)
+:_  state(registry new-registry)
+^-  (list effect)
+efx
+::
+  %registry-del
+=/  lc=registry-cause  [%registry-del key.u.act]
+=/  [efx=(list registry-effect) new-registry=registry-state]
+  (registry-poke registry.state lc)
+:_  state(registry new-registry)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "registry-peek"
+body     = "(registry-peek registry.state path)"

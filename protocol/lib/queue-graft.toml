@@ -1,0 +1,71 @@
+# queue-graft manifest — FIFO job queue with monotonic IDs.
+#
+# Priority 70, third graft in the 50–99 state-graft band. First graft
+# in this phase with a C1 mule-wrap site (%queue-push cues an inner
+# jammed body atom). `after = ["counter-graft"]` keeps the declared
+# state-band ordering explicit.
+#
+# Three poke arms:
+#   %queue-push  — append a body to the tail of the queue (FIFO).
+#                  Body is jammed by the caller; the kernel cue's
+#                  inside a mule, so malformed jam surfaces as
+#                  %queue-error rather than a kernel panic.
+#   %queue-pop   — remove the head. Empty queue emits
+#                  %queue-popped job=~ rather than an error so
+#                  polling consumers don't have to disambiguate
+#                  expected-empty from kernel error.
+#   %queue-clear — drop all pending jobs. next-id is preserved so
+#                  IDs stay monotonic across clears.
+#
+# Peek path: [%queue-len ~] returns the number of pending jobs.
+
+[graft]
+name     = "queue-graft"
+version  = "0.1.0"
+priority = 70
+after    = ["counter-graft"]
+
+[graft.blocks.imports]
+sentinel = "*queue-graft"
+body     = """
+/+  *queue-graft"""
+
+[graft.blocks.state]
+sentinel = "queue=queue-state"
+body     = "queue=queue-state"
+
+[graft.blocks.cause]
+sentinel = "queue-cause"
+body     = "queue-cause"
+
+[graft.blocks.poke]
+sentinel = "%queue-push"
+body     = """
+::
+  %queue-push
+=/  lc=queue-cause  [%queue-push payload.u.act]
+=/  [efx=(list queue-effect) new-queue=queue-state]
+  (queue-poke queue.state lc)
+:_  state(queue new-queue)
+^-  (list effect)
+efx
+::
+  %queue-pop
+=/  lc=queue-cause  [%queue-pop ~]
+=/  [efx=(list queue-effect) new-queue=queue-state]
+  (queue-poke queue.state lc)
+:_  state(queue new-queue)
+^-  (list effect)
+efx
+::
+  %queue-clear
+=/  lc=queue-cause  [%queue-clear ~]
+=/  [efx=(list queue-effect) new-queue=queue-state]
+  (queue-poke queue.state lc)
+:_  state(queue new-queue)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "queue-peek"
+body     = "(queue-peek queue.state path)"

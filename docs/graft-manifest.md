@@ -83,7 +83,7 @@ Grafts fall into five families. The priority number both orders injection and la
 |---|---|---|---|---|---|
 | 1 | Commitment | STARK-bearing primitives that commit data to hull-keyed roots | 10–40 | Shipped | `settle-graft` (10), `mint-graft` (20), `guard-graft` (30), `forge-graft` (40) |
 | 2 | Verification gates | Parameterized decision functions consumed by commitment grafts. Delivered as a library, not a priority-claimed graft | n/a (library) | Scaffolded | `vesl-gates.hoon` (planned — see `.dev/01_GATE_CATALOG.md`) |
-| 3 | State | Domain-keyed app-state primitives (kv, counter, queue, rbac, registry) | 50–99 | Planned | per `.dev/02_STATE_GRAFTS.md` |
+| 3 | State | Domain-keyed app-state primitives (kv, counter, queue, rbac, registry) | 50–99 | Shipped | `kv-graft` (50), `counter-graft` (60), `queue-graft` (70), `rbac-graft` (80), `registry-graft` (90) |
 | 4 | Behavior | Runtime wrappers that enforce or observe rules around other grafts | 100–149 | Planned | per `.dev/03_BEHAVIOR_GRAFTS.md` |
 | 5 | Intent | Multi-party coordination primitives (declare / match / cancel / expire) | 200–299 | Placeholder | `intent-graft` (200, `stability = "placeholder"`) |
 
