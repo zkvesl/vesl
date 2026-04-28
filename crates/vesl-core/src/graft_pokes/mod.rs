@@ -21,3 +21,4 @@ pub mod rbac;
 pub mod registry;
 pub mod clock;
 pub mod log;
+pub mod validate;

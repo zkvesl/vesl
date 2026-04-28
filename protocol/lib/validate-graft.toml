@@ -1,0 +1,85 @@
+# validate-graft manifest — pre-flight rule checks on poke causes.
+#
+# Phase 03c, behavior-graft band priority 100. First consumer of the
+# new [graft.blocks.poke-prelude] marker landed in 03b. Pairs the
+# state-installable rule set with a prelude that short-circuits on
+# rule failure before the kernel's ?- switch runs.
+#
+# Two installation arms:
+#   %validate-init   — install (or replace) the rule list for a
+#                      cause-tag. AND-conjoined; first failure on a
+#                      poke short-circuits with %validate-rejected.
+#   %validate-clear  — drop all rules for a cause-tag. Idempotent.
+#
+# Peek path: [%validate-rules cause-tag=@ta] returns the installed
+# rules for that cause-tag (or ~ if none).
+#
+# Prelude semantics: the prelude inspects every poke's u.act. If
+# rules are installed for u.act's cause-tag, the prelude evaluates
+# them against +.u.act (the body of the cause cell, after the tag).
+# On rule failure the prelude returns [(list effect) state] directly,
+# ending the gate before the ?- switch — state is untouched.
+#
+# Scope (v0.1): cause-level rules ONLY. The .dev/03 doc envisioned
+# field-level rules ([validate-graft.rules.<cause>.<field>]). That
+# requires graft-inject to read manifest config and generate kernel-
+# specific Hoon, which is a separate codegen pass not yet shipped.
+# v0.1 ships the runtime mechanism (state-installable rule lists);
+# field-level rules can layer on top later via codegen without
+# changing the runtime API.
+#
+# v0.1 ships %non-empty only. Other rule shapes (length / in-set /
+# range / unique-in) are reserved in the type union for v0.2.
+
+[graft]
+name     = "validate-graft"
+version  = "0.1.0"
+priority = 100
+after    = []
+
+[graft.blocks.imports]
+sentinel = "*validate-graft"
+body     = """
+/+  *validate-graft"""
+
+[graft.blocks.state]
+sentinel = "validate=validate-state"
+body     = "validate=validate-state"
+
+[graft.blocks.cause]
+sentinel = "validate-cause"
+body     = "validate-cause"
+
+[graft.blocks.poke-prelude]
+sentinel = "validate-rule check"
+body     = """
+=/  v-failure=(unit @t)
+  (check-rules -.u.act +.u.act validate.state)
+?:  ?=(^ v-failure)
+  :_  state
+  ^-  (list effect)
+  ~[[%validate-rejected -.u.act u.v-failure]]"""
+
+[graft.blocks.poke]
+sentinel = "%validate-init"
+body     = """
+::
+  %validate-init
+=/  lc=validate-cause  [%validate-init cause-tag.u.act rules.u.act]
+=/  [efx=(list validate-effect) new-validate=validate-state]
+  (validate-poke validate.state lc)
+:_  state(validate new-validate)
+^-  (list effect)
+efx
+::
+  %validate-clear
+=/  lc=validate-cause  [%validate-clear cause-tag.u.act]
+=/  [efx=(list validate-effect) new-validate=validate-state]
+  (validate-poke validate.state lc)
+:_  state(validate new-validate)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "validate-peek"
+body     = "(validate-peek validate.state path)"
