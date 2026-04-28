@@ -76,3 +76,4 @@ pub use graft_pokes::registry::{
 pub use graft_pokes::clock::build_clock_tick_poke;
 pub use graft_pokes::log::build_log_append_poke;
 pub use graft_pokes::validate::{build_validate_clear_poke, build_validate_init_poke, Rule as ValidateRule};
+pub use graft_pokes::batch::{build_batch_add_poke, build_batch_flush_poke, build_batch_init_poke};

@@ -1,0 +1,82 @@
+# batch-graft manifest — settlement-flush buffer.
+#
+# Phase 03e, behavior-graft band priority 145. Buffers caller-supplied
+# intents and emits a single %batch-flushed effect when the configured
+# trigger fires. The downstream orchestrator (Rust side) routes each
+# bundled intent into settle-graft on its own time — amortizing on-
+# chain cost.
+#
+# Three poke arms:
+#   %batch-init   — set the count threshold. 0 disables auto-flush
+#                   (manual %batch-flush only).
+#   %batch-add    — cue a caller-supplied jammed intent and append
+#                   to the pending buffer. C1 mule-wraps the cue.
+#                   Auto-flushes if pending length meets threshold.
+#   %batch-flush  — manual drain. Always emits %batch-flushed (with
+#                   an empty bundle if pending is empty).
+#
+# Peek paths:
+#   [%batch-pending-len ~] — current pending list length
+#   [%batch-threshold ~]   — current threshold setting
+#
+# Scope (v0.1): COUNT trigger only. The .dev/03 doc envisioned three
+# triggers (count / pages / time):
+#   - count : SHIPPED.
+#   - pages : DEFERRED. See .dev/03_DEFERRALS.md.
+#   - time  : DEFERRED. See .dev/03_DEFERRALS.md.
+# v0.1 ships standalone; the time variant would add `after =
+# ["clock-graft"]` once it ships.
+#
+# C1 site: %batch-add cues caller-supplied bytes. Mule-wrap defends
+# against malformed jam — same pattern as queue-graft / log-graft.
+
+[graft]
+name     = "batch-graft"
+version  = "0.1.0"
+priority = 145
+after    = []
+
+[graft.blocks.imports]
+sentinel = "*batch-graft"
+body     = """
+/+  *batch-graft"""
+
+[graft.blocks.state]
+sentinel = "batch=batch-state"
+body     = "batch=batch-state"
+
+[graft.blocks.cause]
+sentinel = "batch-cause"
+body     = "batch-cause"
+
+[graft.blocks.poke]
+sentinel = "%batch-init"
+body     = """
+::
+  %batch-init
+=/  lc=batch-cause  [%batch-init threshold.u.act]
+=/  [efx=(list batch-effect) new-batch=batch-state]
+  (batch-poke batch.state lc)
+:_  state(batch new-batch)
+^-  (list effect)
+efx
+::
+  %batch-add
+=/  lc=batch-cause  [%batch-add payload.u.act]
+=/  [efx=(list batch-effect) new-batch=batch-state]
+  (batch-poke batch.state lc)
+:_  state(batch new-batch)
+^-  (list effect)
+efx
+::
+  %batch-flush
+=/  lc=batch-cause  [%batch-flush ~]
+=/  [efx=(list batch-effect) new-batch=batch-state]
+  (batch-poke batch.state lc)
+:_  state(batch new-batch)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "batch-peek"
+body     = "(batch-peek batch.state path)"
