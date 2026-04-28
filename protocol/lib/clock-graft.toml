@@ -1,0 +1,56 @@
+# clock-graft manifest — deterministic event-counter clock.
+#
+# Priority 140, top of the 100–149 behavior-graft band. clock-graft and
+# log-graft are the additive pilots of Phase 03 — pure observers with
+# no wrapping semantics, so they ship under the existing graft-inject
+# markers (no prelude/postlude needed).
+#
+# One poke arm:
+#   %clock-tick  — advance the monotonic counter by 1. Caller-paced;
+#                  the kernel does not auto-tick. This is deliberate:
+#                  v0.1 has no real-world time source. Callers who
+#                  need synchronized "now" pace their own ticks.
+#
+# Peek path: [%clock-now ~] returns the current @da (event-count
+# casted as kernel-time units; opaque, monotonic).
+#
+# Determinism floor: event-count source ONLY. boot-offset and
+# block-time sources were considered and deferred — see the graft
+# header for the full rationale.
+#
+# No C1 mule-wrap site: %clock-tick carries no payload.
+
+[graft]
+name     = "clock-graft"
+version  = "0.1.0"
+priority = 140
+after    = []
+
+[graft.blocks.imports]
+sentinel = "*clock-graft"
+body     = """
+/+  *clock-graft"""
+
+[graft.blocks.state]
+sentinel = "clock=clock-state"
+body     = "clock=clock-state"
+
+[graft.blocks.cause]
+sentinel = "clock-cause"
+body     = "clock-cause"
+
+[graft.blocks.poke]
+sentinel = "%clock-tick"
+body     = """
+::
+  %clock-tick
+=/  lc=clock-cause  [%clock-tick ~]
+=/  [efx=(list clock-effect) new-clock=clock-state]
+  (clock-poke clock.state lc)
+:_  state(clock new-clock)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "clock-peek"
+body     = "(clock-peek clock.state path)"

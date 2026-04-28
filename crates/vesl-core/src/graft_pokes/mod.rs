@@ -19,3 +19,5 @@ pub mod counter;
 pub mod queue;
 pub mod rbac;
 pub mod registry;
+pub mod clock;
+pub mod log;
