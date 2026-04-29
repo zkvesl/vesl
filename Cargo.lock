@@ -6558,7 +6558,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "vesl-signing",
  "zeroize",
+]
+
+[[package]]
+name = "vesl-signing"
+version = "0.0.0"
+dependencies = [
+ "bs58",
+ "ibig",
+ "once_cell",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

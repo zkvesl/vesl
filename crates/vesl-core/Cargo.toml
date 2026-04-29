@@ -11,6 +11,16 @@ nockchain-tip5-rs = { path = "../nockchain-tip5-rs", features = ["serde"] }
 nock-noun-rs = { path = "../nock-noun-rs" }
 nockchain-client-rs = { path = "../nockchain-client-rs" }
 
+# Canonical Schnorr-over-Cheetah signing — lifted out of x402-nockchain-crypto
+# in Phase 0 W1-3 (per
+# `vesl-labs/docs/plans/shared-infrastructure/10-PHASE-0-NOW.md`).
+# `crates/vesl-core/src/signing.rs` is now a backwards-compat shim
+# that delegates to vesl-signing; existing API ([Belt; 8]-flavored
+# `derive_pubkey`/`sign`/`key_from_seed_phrase`) is preserved.
+# Path dep during local development; switch to git-dep with v0.1.0
+# once vesl-identity ships.
+vesl-signing = { path = "../../../vesl-identity/crates/vesl-signing", default-features = false }
+
 # Nockchain monorepo crates — path-dep to sibling ../nockchain clone.
 nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }
 nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
