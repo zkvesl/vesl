@@ -3,7 +3,7 @@ name = "vesl-core"
 version = "0.5.0"
 edition = "2024"
 description = "High-level Vesl SDK — Mint/Guard/Settle/Forge facades over the extracted crate stack"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Sibling extracted crates
@@ -18,16 +18,22 @@ nockchain-client-rs = { path = "../nockchain-client-rs" }
 # that delegates to vesl-signing; existing API ([Belt; 8]-flavored
 # `derive_pubkey`/`sign`/`key_from_seed_phrase`) is preserved.
 # Path dep during local development; switch to git-dep with v0.1.0
-# once vesl-identity ships.
-vesl-signing = { path = "../../../vesl-identity/crates/vesl-signing", default-features = false }
+# once the vesl-wallet repo cuts v0.1.0.
+vesl-signing = { path = "../../../vesl-wallet/crates/vesl-signing", default-features = false }
 
-# Vesl wallet derivation spec — Phase 0 W4-5 (per
-# `vesl-labs/docs/plans/shared-infrastructure/10-PHASE-0-NOW.md`).
-# Doc-only crate exposing role constants + `DerivationPath`. No
-# derivation logic — that lives in `vesl-wallet` (Phase 0 W6-8).
+# Vesl wallet derivation spec — doc-only crate exposing role constants
+# + `DerivationPath`. No derivation logic — that lives in `vesl-wallet`.
 # Path-dep during local development; switch to git-dep with v0.1.0
 # alongside vesl-signing once end-to-end verification ships.
-vesl-wallet-spec = { path = "../../../vesl-identity/crates/vesl-wallet-spec", default-features = false }
+vesl-wallet-spec = { path = "../../../vesl-wallet/crates/vesl-wallet-spec", default-features = false }
+
+# Vesl wallet — high-level Hull-author API: BIP-39 mnemonic + custom
+# Cheetah-BIP32-over-Tip5 HD derivation, with per-role convenience
+# signers driven by `vesl-wallet-spec` constants. Provides the canonical
+# `key_from_seed_phrase` implementation that the local signing shim now
+# delegates to. Path-dep during local development; switch to git-dep
+# with v0.1.0 once the vesl-wallet repo cuts v0.1.0.
+vesl-wallet = { path = "../../../vesl-wallet/crates/vesl-wallet", default-features = false }
 
 # Nockchain monorepo crates — path-dep to sibling ../nockchain clone.
 nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }

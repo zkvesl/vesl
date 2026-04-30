@@ -3,11 +3,11 @@
 //! pre-shim semantics on every edge case the original implementation
 //! handled.
 //!
-//! The shim was introduced in Phase 0 W1-3 (per
-//! `vesl-labs/docs/plans/shared-infrastructure/10-PHASE-0-NOW.md`)
-//! when canonical Schnorr-over-Cheetah signing moved out of vesl-core
-//! and into `github.com/zkvesl/vesl-identity::vesl-signing`. Anything
-//! that broke from the lift would surface here.
+//! The shim translates between the local `[Belt; 8]`-flavored API and
+//! `vesl-signing`'s `UBig`-based primitives. Anything that breaks the
+//! conversion contract (or the BIP-39 + BIP-44 path that
+//! `key_from_seed_phrase` now delegates to via `vesl-wallet`) surfaces
+//! here.
 
 use ibig::UBig;
 use nockchain_math::belt::Belt;
@@ -79,32 +79,53 @@ fn pubkey_hash_distinguishes_keys() {
     assert_ne!(pkh1.0, pkh2.0);
 }
 
+/// Canonical BIP-39 12-word test vector ("abandon×11 + about").
+const CANONICAL_MNEMONIC: &str =
+    "abandon abandon abandon abandon abandon abandon abandon abandon \
+     abandon abandon abandon about";
+
+/// Second canonical BIP-39 vector for distinct-input tests.
+const ALT_MNEMONIC: &str =
+    "legal winner thank year wave sausage worth useful legal winner thank yellow";
+
 #[test]
-fn key_from_seed_phrase_rejects_pathological() {
-    // Empty phrase → hashes to *something*; the shim accepts it (the
-    // "all-zero" rejection is at scalar level, not phrase level).
-    // Document the contract: only an exact zero scalar is rejected.
-    let result = key_from_seed_phrase("");
-    // Empty phrase produces a non-zero scalar in the current
-    // implementation, so this should succeed. If a hash collision ever
-    // makes it zero, this asserts the error is reported (not silent
-    // generation of a zero key).
-    match result {
-        Ok(sk) => {
-            assert!(sk.iter().any(|b| b.0 != 0), "empty phrase must not produce zero key");
-        }
-        Err(SigningError::ZeroSeedScalar) => {
-            // Acceptable — pathological scalar surfaces correctly.
-        }
-        Err(other) => panic!("unexpected error: {other:?}"),
+fn key_from_seed_phrase_rejects_invalid_mnemonic() {
+    // The empty string is not a valid BIP-39 mnemonic; with the
+    // BIP-39 + BIP-44 path that replaced the prior ad-hoc Tip5 hash,
+    // only real mnemonics succeed.
+    match key_from_seed_phrase("") {
+        Err(SigningError::InvalidMnemonic(_)) => {}
+        other => panic!("expected InvalidMnemonic, got {other:?}"),
     }
 }
 
 #[test]
 fn key_from_seed_phrase_distinct_phrases_distinct_keys() {
-    let a = key_from_seed_phrase("alice").unwrap();
-    let b = key_from_seed_phrase("bob").unwrap();
+    let a = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
+    let b = key_from_seed_phrase(ALT_MNEMONIC).unwrap();
     assert_ne!(a, b);
+}
+
+#[test]
+fn key_from_seed_phrase_is_deterministic() {
+    let a = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
+    let b = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
+    assert_eq!(a, b);
+}
+
+#[test]
+fn key_from_seed_phrase_canonical_round_trips_through_sign() {
+    // The key extracted from a canonical BIP-39 mnemonic must produce a
+    // valid Schnorr signature under the shim's [Belt; 8] API.
+    let sk = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
+    let m = [Belt(1), Belt(2), Belt(3), Belt(4), Belt(5)];
+    let sig = sign(&sk, &m).expect("signing should succeed");
+    let pk = derive_pubkey(&sk);
+    // Sanity: signature components are non-zero and pubkey is on-curve
+    // (vesl-signing rejects the off-curve case in derive_pubkey).
+    assert!(!pk.0.inf);
+    assert!(sig.chal.iter().any(|b| b.0 != 0));
+    assert!(sig.sig.iter().any(|b| b.0 != 0));
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 //! Schnorr signing over the Cheetah curve — backwards-compat shim over
-//! `vesl-signing`.
+//! `vesl-signing`, plus a BIP-39 + BIP-44 entry point delegated to
+//! `vesl-wallet`.
 //!
-//! Phase 0 W1-3 lifted the canonical Schnorr-over-Cheetah primitives to
-//! `github.com/zkvesl/vesl-identity::vesl-signing`. This module retains
+//! Canonical Schnorr-over-Cheetah primitives live in
+//! `github.com/zkvesl/vesl-wallet::vesl-signing`. This module retains
 //! the `[Belt; 8]`-flavored API that vesl-core has historically exposed
 //! to its callers (`settle.rs`, `config.rs`, `lib.rs` re-exports),
 //! translating to/from vesl-signing's `UBig`-based representation at the
@@ -16,33 +17,28 @@
 //!   (verbatim port). Convert via the public `x: F6lt`, `y: F6lt`,
 //!   `inf: bool` fields.
 //!
-//! Two functions stay local rather than delegating, because they hit
-//! noun-aware machinery vesl-signing doesn't carry:
-//!
-//! - [`pubkey_hash`] uses `hash_noun_varlen_digest` from `nockchain-math`,
-//!   which takes a `NounSlab` (Hoon-noun layer).
-//! - [`key_from_seed_phrase`] uses an ad-hoc string-to-belts hash
-//!   (NOT BIP39). The Phase 0 W6-8 `vesl-wallet` crate ships the
-//!   pure-Rust BIP39 HD derivation that supersedes this helper.
+//! `pubkey_hash` stays local because it uses
+//! `hash_noun_varlen_digest` from `nockchain-math`, which takes a
+//! `NounSlab` (Hoon-noun layer that vesl-signing does not carry).
 
 use std::fmt;
 
 use ibig::UBig;
 use nockchain_math::belt::Belt;
 use nockchain_math::crypto::cheetah::{
-    trunc_g_order, CheetahPoint as NockCheetahPoint, F6lt as NockF6lt, G_ORDER,
+    CheetahPoint as NockCheetahPoint, F6lt as NockF6lt,
 };
-use nockchain_math::tip5::hash::hash_varlen;
 use nockchain_types::tx_engine::common::{Hash, SchnorrPubkey, SchnorrSignature};
 use vesl_signing::prelude::Belt as VeslBelt;
 use vesl_signing::schnorr::{
     schnorr_sign, CheetahPoint as VeslCheetahPoint, F6lt as VeslF6lt, SchnorrError,
     SchnorrPrivateKey,
 };
+use vesl_wallet::{VeslWallet, WalletError, VESL_COIN_TYPE_PLACEHOLDER};
 use zeroize::Zeroize;
 
 // ---------------------------------------------------------------------------
-// Error type — preserves pre-shim API
+// Error type — preserves pre-shim API plus a BIP-39 mnemonic variant.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
@@ -51,7 +47,15 @@ pub enum SigningError {
     ZeroNonce,
     ZeroChallenge,
     ZeroSignature,
-    ZeroSeedScalar,
+    /// Returned by [`key_from_seed_phrase`] when the input string is not
+    /// a valid BIP-39 mnemonic. The previous ad-hoc Tip5-hash variant
+    /// accepted any string, but the BIP-39 + BIP-44 derivation that
+    /// replaced it requires a real mnemonic.
+    InvalidMnemonic(String),
+    /// Returned by [`key_from_seed_phrase`] when the BIP-44 derivation
+    /// produces a scalar outside `(0, G_ORDER)`. Cryptographically
+    /// negligible with Tip5 but typed for completeness.
+    DerivationFailure(String),
 }
 
 impl fmt::Display for SigningError {
@@ -61,9 +65,8 @@ impl fmt::Display for SigningError {
             Self::ZeroNonce => write!(f, "deterministic nonce was zero"),
             Self::ZeroChallenge => write!(f, "challenge was zero"),
             Self::ZeroSignature => write!(f, "signature was zero"),
-            Self::ZeroSeedScalar => {
-                write!(f, "seed phrase produced zero scalar — use a different phrase")
-            }
+            Self::InvalidMnemonic(msg) => write!(f, "invalid BIP-39 mnemonic: {msg}"),
+            Self::DerivationFailure(msg) => write!(f, "BIP-44 derivation failed: {msg}"),
         }
     }
 }
@@ -72,10 +75,6 @@ impl std::error::Error for SigningError {}
 
 impl From<SchnorrError> for SigningError {
     fn from(e: SchnorrError) -> Self {
-        // vesl-signing has more error variants than the pre-shim API;
-        // fold them into the most-specific existing variant. Tests in
-        // settle.rs / config.rs only branch on InvalidSecretKey today,
-        // so the lossy fold is safe.
         match e {
             SchnorrError::BadPrivateKey | SchnorrError::OutOfRange => Self::InvalidSecretKey,
             SchnorrError::BadSignature => Self::ZeroSignature,
@@ -83,6 +82,24 @@ impl From<SchnorrError> for SigningError {
             | SchnorrError::ChunkOverflow(_)
             | SchnorrError::BadChunk(_)
             | SchnorrError::BadPubkey(_) => Self::InvalidSecretKey,
+        }
+    }
+}
+
+impl From<WalletError> for SigningError {
+    fn from(e: WalletError) -> Self {
+        match e {
+            WalletError::InvalidMnemonic(msg) => Self::InvalidMnemonic(msg),
+            WalletError::InvalidScalar => Self::DerivationFailure(
+                "derived scalar landed outside (0, G_ORDER); rotate index".into(),
+            ),
+            WalletError::NonBip44Purpose(c) => {
+                Self::DerivationFailure(format!("non-BIP44 coin_type {c}"))
+            }
+            WalletError::IndexOverflow(i) => {
+                Self::DerivationFailure(format!("hardened index {i} exceeds 31-bit limit"))
+            }
+            WalletError::Signing(inner) => Self::from(inner),
         }
     }
 }
@@ -159,66 +176,29 @@ pub fn sign(sk: &[Belt; 8], message: &[Belt; 5]) -> Result<SchnorrSignature, Sig
 }
 
 // ---------------------------------------------------------------------------
-// Key derivation (local — non-BIP39, superseded by vesl-wallet at W6-8)
+// Key derivation — BIP-39 + BIP-44 via vesl-wallet (replaces the prior
+// ad-hoc Tip5 hash). Existing seeds will produce different keys; callers
+// that relied on the pre-replacement behavior must migrate to a real
+// BIP-39 mnemonic.
 // ---------------------------------------------------------------------------
 
-/// Derive a signing key from a seed phrase.
+/// Derive a signing key from a BIP-39 mnemonic.
 ///
-/// Hashes the phrase bytes through tip5's `hash_varlen`, then truncates
-/// to a valid scalar in `(0, g_order)` and packs into 8 × 32-bit Belts.
-/// **Not BIP39.** The Phase 0 W6-8 `vesl-wallet` crate provides
-/// pure-Rust BIP39 HD derivation; once it ships, callers should migrate.
+/// Internally builds a [`VeslWallet`] with no passphrase and the
+/// placeholder coin_type, then returns the intent-role key at
+/// `m/44'/<placeholder>'/0'/ROLE_INTENT/0` as a `[Belt; 8]` for
+/// callers that haven't moved to the typed wallet API yet.
+///
+/// Returns [`SigningError::InvalidMnemonic`] if `phrase` is not a valid
+/// BIP-39 mnemonic (any word count / wordlist supported by the `bip39`
+/// crate). Callers that want a different account / role / index, a
+/// non-empty BIP-39 passphrase, or a different coin_type should
+/// instantiate `VeslWallet` directly and call `intent_signer` /
+/// `payment_signer` / `derive` themselves.
 pub fn key_from_seed_phrase(phrase: &str) -> Result<[Belt; 8], SigningError> {
-    let bytes = phrase.as_bytes();
-    // Pack bytes into Belt values (8 bytes per Belt, little-endian)
-    let mut belts: Vec<Belt> = Vec::with_capacity(bytes.len().div_ceil(8));
-    for chunk in bytes.chunks(8) {
-        let mut val: u64 = 0;
-        for (i, &b) in chunk.iter().enumerate() {
-            val |= (b as u64) << (i * 8);
-        }
-        belts.push(Belt(val));
-    }
-    let hash = hash_varlen(&mut belts);
-    // Zeroize: belts contains seed-derived key material (C-002)
-    for b in belts.iter_mut() {
-        b.0.zeroize();
-    }
-    let scalar = SecretScalar(trunc_g_order(&hash));
-    if *scalar == UBig::from(0u64) {
-        return Err(SigningError::ZeroSeedScalar);
-    }
-    let result = ubig_to_belts8(&scalar);
-    // scalar zeroized on drop (C-002)
-    Ok(result)
-}
-
-// ---------------------------------------------------------------------------
-// Sensitive scalar wrapper (C-002) — see AUDIT 2026-04-17 L-06 for the
-// non-zeroizing UBig caveat.
-// ---------------------------------------------------------------------------
-
-/// Wrapper for UBig values derived from secret key material. Overwrites
-/// the value with zero on drop. See AUDIT 2026-04-17 L-06.
-struct SecretScalar(UBig);
-
-impl Drop for SecretScalar {
-    fn drop(&mut self) {
-        self.0 = UBig::from(0u64);
-    }
-}
-
-impl std::ops::Deref for SecretScalar {
-    type Target = UBig;
-    fn deref(&self) -> &UBig {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for SecretScalar {
-    fn deref_mut(&mut self) -> &mut UBig {
-        &mut self.0
-    }
+    let wallet = VeslWallet::from_seed_phrase(phrase, "", VESL_COIN_TYPE_PLACEHOLDER)?;
+    let intent_key = wallet.intent_signer(0, 0)?;
+    Ok(vesl_belts8_to_nock(&intent_key.to_belts()))
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +215,11 @@ fn nock_belts8_to_vesl(belts: &[Belt; 8]) -> [VeslBelt; 8] {
 /// Same as [`nock_belts8_to_vesl`] for the 5-Belt message digest shape.
 fn nock_belts5_to_vesl(belts: &[Belt; 5]) -> [VeslBelt; 5] {
     std::array::from_fn(|i| VeslBelt(belts[i].0))
+}
+
+/// Convert vesl-signing `[Belt; 8]` back into nockchain-math `[Belt; 8]`.
+fn vesl_belts8_to_nock(belts: &[VeslBelt; 8]) -> [Belt; 8] {
+    std::array::from_fn(|i| Belt(belts[i].0))
 }
 
 /// Convert a vesl-signing `CheetahPoint` to the nockchain-math form.
@@ -292,13 +277,6 @@ pub(crate) fn ubig_to_belts8(val: &UBig) -> [Belt; 8] {
     belts
 }
 
-// `_unused_g_order` reference keeps the import alive for downstream
-// changes that may need direct G_ORDER access through this module.
-#[allow(dead_code)]
-fn _g_order_marker() {
-    let _ = &*G_ORDER;
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -306,7 +284,19 @@ fn _g_order_marker() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nockchain_math::crypto::cheetah::{ch_add, ch_neg, ch_scal_big, A_GEN, F6_ZERO};
+    use nockchain_math::crypto::cheetah::{
+        ch_add, ch_neg, ch_scal_big, trunc_g_order, A_GEN, F6_ZERO,
+    };
+    use nockchain_math::tip5::hash::hash_varlen;
+
+    /// Canonical BIP-39 12-word test vector ("abandon×11 + about").
+    const CANONICAL_MNEMONIC: &str =
+        "abandon abandon abandon abandon abandon abandon abandon abandon \
+         abandon abandon abandon about";
+
+    /// A second canonical BIP-39 vector for distinct-input tests.
+    const ALT_MNEMONIC: &str =
+        "legal winner thank year wave sausage worth useful legal winner thank yellow";
 
     #[test]
     fn derive_pubkey_from_nonzero_key() {
@@ -396,15 +386,31 @@ mod tests {
     }
 
     #[test]
-    fn key_from_seed_phrase_produces_valid_key() {
-        let sk = key_from_seed_phrase("test seed phrase for key derivation")
-            .expect("key derivation should succeed");
-        // Key should be non-zero
+    fn key_from_seed_phrase_accepts_canonical_bip39() {
+        let sk = key_from_seed_phrase(CANONICAL_MNEMONIC)
+            .expect("canonical BIP-39 mnemonic must succeed");
         assert!(sk.iter().any(|b| b.0 != 0));
-        // Different phrases should produce different keys
-        let sk2 = key_from_seed_phrase("a completely different seed phrase")
-            .expect("key derivation should succeed");
-        assert_ne!(sk, sk2);
+    }
+
+    #[test]
+    fn key_from_seed_phrase_distinct_phrases_distinct_keys() {
+        let a = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
+        let b = key_from_seed_phrase(ALT_MNEMONIC).unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn key_from_seed_phrase_rejects_invalid_mnemonic() {
+        let err = key_from_seed_phrase("not a real mnemonic")
+            .expect_err("invalid mnemonic must fail");
+        assert!(matches!(err, SigningError::InvalidMnemonic(_)));
+    }
+
+    #[test]
+    fn key_from_seed_phrase_is_deterministic() {
+        let a = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
+        let b = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
+        assert_eq!(a, b);
     }
 
     #[test]

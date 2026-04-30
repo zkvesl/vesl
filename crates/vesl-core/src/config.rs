@@ -9,6 +9,9 @@
 use std::fmt;
 
 use nockchain_math::belt::Belt;
+use vesl_wallet::{
+    VeslWallet, ROLE_INTENT, ROLE_X402, VESL_COIN_TYPE_PLACEHOLDER,
+};
 
 use crate::signing;
 
@@ -59,11 +62,9 @@ impl std::str::FromStr for SettlementMode {
 ///
 /// Domain hulls embed these in their own config struct and convert via `From`.
 ///
-/// `account` and `role` are forward-compat placeholders for the W6-8
-/// `vesl-wallet` typed API. They land at W4-5 alongside `vesl-wallet-spec`
-/// so Hull authors can start writing nockup.toml in the W6-8 shape today.
-/// Currently silently passed through to the resolved config without affecting
-/// signing or keygen.
+/// The `[wallet]` block is the entry point for the per-role config-toggle
+/// pattern: an intent app reads `[wallet.intent]`, a payment app reads
+/// `[wallet.payment]`. Same code, different role.
 #[derive(Debug, Default)]
 pub struct SettlementToml {
     pub settlement_mode: Option<String>,
@@ -71,10 +72,43 @@ pub struct SettlementToml {
     pub tx_fee: Option<u64>,
     pub coinbase_timelock_min: Option<u64>,
     pub accept_timeout_secs: Option<u64>,
-    /// Forward-compat: per-agent BIP44 account index (consumed at W6-8 by `vesl-wallet`).
+    pub wallet: Option<WalletToml>,
+}
+
+/// `[wallet]` TOML block — BIP-39 + BIP-44 derivation parameters consumed
+/// by `vesl-wallet`.
+///
+/// Example:
+/// ```toml
+/// [wallet]
+/// seed_phrase = "..."
+/// coin_type = 0x7E51C0DE     # optional — defaults to VESL_COIN_TYPE_PLACEHOLDER
+/// account = 0
+///
+/// [wallet.intent]
+/// role = 0                    # optional — defaults to ROLE_INTENT
+/// index = 0
+///
+/// [wallet.payment]
+/// role = 4                    # optional — defaults to ROLE_X402
+/// index = 0
+/// ```
+#[derive(Debug, Default, Clone)]
+pub struct WalletToml {
+    pub seed_phrase: Option<String>,
+    pub coin_type: Option<u32>,
     pub account: Option<u32>,
-    /// Forward-compat: BIP44 role per `vesl-wallet-spec` (consumed at W6-8 by `vesl-wallet`).
+    pub intent: Option<WalletRoleToml>,
+    pub payment: Option<WalletRoleToml>,
+}
+
+/// `[wallet.intent]` / `[wallet.payment]` TOML sub-block. Either field
+/// may be omitted; absent fields fall through to the defaults
+/// (`ROLE_INTENT` / `ROLE_X402` for `role`, `0` for `index`).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WalletRoleToml {
     pub role: Option<u32>,
+    pub index: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +120,13 @@ pub struct SettlementToml {
 /// Grouped so adding a new CLI flag isn't a breaking change at every callsite
 /// (audit MAINTENANCE_AUDIT_LOG.md §3.1, deferred from commit 9c446dd).
 /// Resolution order is unchanged: CLI > env > toml > mode defaults.
+///
+/// CLI-side wallet overrides are intentionally minimal: `account` (the
+/// per-agent account index) is the one knob that's commonly worth a flag.
+/// Per-role index/role overrides live in TOML only — flipping them on
+/// the command line would silently re-derive a different key, which is
+/// exactly the kind of footgun the `[wallet]` config-toggle pattern is
+/// designed to avoid.
 #[derive(Debug, Default)]
 pub struct SettlementCliOverrides {
     pub mode: Option<SettlementMode>,
@@ -95,10 +136,59 @@ pub struct SettlementCliOverrides {
     pub coinbase_timelock_min: Option<u64>,
     pub accept_timeout: Option<u64>,
     pub seed_phrase: Option<String>,
-    /// Forward-compat: per-agent BIP44 account index (consumed at W6-8 by `vesl-wallet`).
+    /// Override `[wallet] account = N` from the command line.
     pub account: Option<u32>,
-    /// Forward-compat: BIP44 role per `vesl-wallet-spec` (consumed at W6-8 by `vesl-wallet`).
-    pub role: Option<u32>,
+}
+
+// ---------------------------------------------------------------------------
+// Resolved wallet configuration (all defaults applied)
+// ---------------------------------------------------------------------------
+
+/// Fully-resolved wallet configuration: every field has a concrete
+/// value, defaults applied. Held inside [`SettlementConfig::wallet`].
+#[derive(Debug, Clone)]
+pub struct WalletConfig {
+    /// BIP-39 mnemonic. None when no phrase was supplied (the resolved
+    /// config is then "wallet shape, no seed" — useful for tests).
+    pub seed_phrase: Option<String>,
+    pub coin_type: u32,
+    pub account: u32,
+    pub intent: WalletRoleConfig,
+    pub payment: WalletRoleConfig,
+}
+
+/// Resolved per-role derivation parameters.
+#[derive(Debug, Clone, Copy)]
+pub struct WalletRoleConfig {
+    pub role: u32,
+    pub index: u32,
+}
+
+impl WalletConfig {
+    /// Defaults: intent → ROLE_INTENT/0, payment → ROLE_X402/0,
+    /// coin_type → VESL_COIN_TYPE_PLACEHOLDER, account → 0, no
+    /// seed phrase.
+    pub fn default_shape() -> Self {
+        Self {
+            seed_phrase: None,
+            coin_type: VESL_COIN_TYPE_PLACEHOLDER,
+            account: 0,
+            intent: WalletRoleConfig { role: ROLE_INTENT, index: 0 },
+            payment: WalletRoleConfig { role: ROLE_X402, index: 0 },
+        }
+    }
+
+    /// Build a `VeslWallet` from this config. Returns `Ok(None)` when
+    /// no seed phrase is configured.
+    pub fn build_wallet(&self) -> Result<Option<VeslWallet>, signing::SigningError> {
+        match self.seed_phrase.as_ref() {
+            None => Ok(None),
+            Some(phrase) => {
+                let wallet = VeslWallet::from_seed_phrase(phrase, "", self.coin_type)?;
+                Ok(Some(wallet))
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +201,8 @@ pub struct SettlementConfig {
     pub mode: SettlementMode,
     /// gRPC endpoint (e.g. "http://localhost:9090"). None for local mode.
     pub chain_endpoint: Option<String>,
-    /// Signing key. None for local mode (and dumbnet until wallet init).
+    /// Signing key. None for local mode (and dumbnet until a wallet
+    /// seed phrase is supplied).
     pub signing_key: Option<[Belt; 8]>,
     pub coinbase_timelock_min: u64,
     pub tx_fee: u64,
@@ -120,15 +211,9 @@ pub struct SettlementConfig {
     /// How long to wait for TX acceptance before giving up (seconds).
     /// Fakenet: 300s, dumbnet: 900s (blocks are ~10min).
     pub accept_timeout_secs: u64,
-    /// Forward-compat: per-agent BIP44 account index. Currently passed through
-    /// from CLI/TOML without affecting `signing_key` derivation. The W6-8
-    /// `vesl-wallet` typed API will consume this to derive role-specific keys.
-    pub account: Option<u32>,
-    /// Forward-compat: BIP44 role per `vesl-wallet-spec`. Currently passed
-    /// through from CLI/TOML without affecting `signing_key` derivation. The
-    /// W6-8 `vesl-wallet` typed API will consume this to derive role-specific
-    /// keys (e.g., `ROLE_INTENT` for intent apps, `ROLE_X402` for payment apps).
-    pub role: Option<u32>,
+    /// Resolved wallet configuration. None when neither CLI nor TOML
+    /// supplied a `[wallet]` block.
+    pub wallet: Option<WalletConfig>,
 }
 
 impl SettlementConfig {
@@ -142,8 +227,7 @@ impl SettlementConfig {
             tx_fee: 256,
             auto_submit: false,
             accept_timeout_secs: 0,
-            account: None,
-            role: None,
+            wallet: None,
         }
     }
 
@@ -180,19 +264,27 @@ impl SettlementConfig {
                 }
             });
 
-        // Forward-compat fields (W4-5): account/role flow through from
-        // CLI > TOML for every mode. Currently unused by signing/keygen —
-        // consumed by the W6-8 `vesl-wallet` typed API.
-        let account = overrides.account.or(toml.account);
-        let role = overrides.role.or(toml.role);
+        // 2. Resolve seed phrase: CLI > env > toml.wallet.seed_phrase
+        let seed_phrase = overrides
+            .seed_phrase
+            .clone()
+            .or_else(|| std::env::var("VESL_SEED_PHRASE").ok())
+            .or_else(|| toml.wallet.as_ref().and_then(|w| w.seed_phrase.clone()));
+
+        // 3. Resolve wallet shape if either side touched it.
+        let wallet_cfg = resolve_wallet(toml.wallet.as_ref(), overrides.account, seed_phrase);
 
         match mode {
-            SettlementMode::Local => {
-                let mut cfg = Self::local();
-                cfg.account = account;
-                cfg.role = role;
-                Ok(cfg)
-            }
+            SettlementMode::Local => Ok(Self {
+                mode: SettlementMode::Local,
+                chain_endpoint: None,
+                signing_key: None,
+                coinbase_timelock_min: 1,
+                tx_fee: 256,
+                auto_submit: false,
+                accept_timeout_secs: 0,
+                wallet: wallet_cfg,
+            }),
 
             SettlementMode::Fakenet => Ok(Self {
                 mode: SettlementMode::Fakenet,
@@ -214,8 +306,7 @@ impl SettlementConfig {
                     .accept_timeout
                     .or(toml.accept_timeout_secs)
                     .unwrap_or(300),
-                account,
-                role,
+                wallet: wallet_cfg,
             }),
 
             SettlementMode::Dumbnet => {
@@ -229,17 +320,23 @@ impl SettlementConfig {
                             .to_string()
                     })?;
 
-                // Resolve signing key: CLI seed phrase > env var > None
-                let seed = overrides
-                    .seed_phrase
-                    .clone()
-                    .or_else(|| std::env::var("VESL_SEED_PHRASE").ok());
-                let sk = match seed {
+                // Derive the legacy [Belt; 8] signing_key at the
+                // resolved wallet's intent role/index. New consumers
+                // should use the `intent_signer_belts` /
+                // `payment_signer_belts` helpers below instead.
+                let sk = match wallet_cfg.as_ref() {
+                    Some(w) => match w.seed_phrase.as_deref() {
+                        None => None,
+                        Some(phrase) => {
+                            let wallet = VeslWallet::from_seed_phrase(phrase, "", w.coin_type)
+                                .map_err(|e| format!("invalid seed phrase: {e:?}"))?;
+                            let key = wallet
+                                .intent_signer(w.account, w.intent.index)
+                                .map_err(|e| format!("intent_signer derivation failed: {e:?}"))?;
+                            Some(intent_key_to_belts8(&key))
+                        }
+                    },
                     None => None,
-                    Some(s) => Some(
-                        signing::key_from_seed_phrase(&s)
-                            .map_err(|e| format!("invalid seed phrase: {e:?}"))?,
-                    ),
                 };
 
                 Ok(Self {
@@ -256,8 +353,7 @@ impl SettlementConfig {
                         .accept_timeout
                         .or(toml.accept_timeout_secs)
                         .unwrap_or(900),
-                    account,
-                    role,
+                    wallet: wallet_cfg,
                 })
             }
         }
@@ -279,6 +375,43 @@ impl SettlementConfig {
             }
         })
     }
+
+    /// Return the per-role intent signer as a legacy `[Belt; 8]`. The
+    /// TOML config-toggle pattern: an intent app calls this. Returns
+    /// `Ok(None)` when no wallet seed phrase is configured.
+    pub fn intent_signer_belts(&self) -> Result<Option<[Belt; 8]>, signing::SigningError> {
+        self.derive_role_belts(|w| (w.intent.role, w.intent.index))
+    }
+
+    /// Return the per-role payment signer as a legacy `[Belt; 8]`. The
+    /// TOML config-toggle pattern: a payment app calls this. Returns
+    /// `Ok(None)` when no wallet seed phrase is configured.
+    pub fn payment_signer_belts(&self) -> Result<Option<[Belt; 8]>, signing::SigningError> {
+        self.derive_role_belts(|w| (w.payment.role, w.payment.index))
+    }
+
+    fn derive_role_belts<F>(&self, pick: F) -> Result<Option<[Belt; 8]>, signing::SigningError>
+    where
+        F: FnOnce(&WalletConfig) -> (u32, u32),
+    {
+        let wallet_cfg = match self.wallet.as_ref() {
+            None => return Ok(None),
+            Some(w) => w,
+        };
+        let wallet = match wallet_cfg.build_wallet()? {
+            None => return Ok(None),
+            Some(w) => w,
+        };
+        let (role, index) = pick(wallet_cfg);
+        let path = vesl_wallet::DerivationPath::new(
+            wallet_cfg.coin_type,
+            wallet_cfg.account,
+            role,
+            index,
+        );
+        let derived = wallet.derive(path).map_err(signing::SigningError::from)?;
+        Ok(Some(intent_key_to_belts8(&derived.private_key)))
+    }
 }
 
 impl fmt::Display for SettlementConfig {
@@ -295,12 +428,75 @@ impl fmt::Display for SettlementConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a vesl-signing `SchnorrPrivateKey` to nockchain-math `[Belt; 8]`.
+/// Mirrors `signing::vesl_belts8_to_nock` but stays here to avoid widening
+/// that module's pub(crate) surface.
+fn intent_key_to_belts8(key: &vesl_signing::schnorr::SchnorrPrivateKey) -> [Belt; 8] {
+    let vesl_belts = key.to_belts();
+    std::array::from_fn(|i| Belt(vesl_belts[i].0))
+}
+
+/// Resolve the wallet shape: applies CLI account override, TOML
+/// account/role/index, and the placeholder defaults. Returns
+/// `Some(WalletConfig)` whenever any wallet-related signal is present
+/// (TOML block, CLI account, or a seed phrase resolved from any
+/// source). Returns `None` only when nothing requested a wallet.
+fn resolve_wallet(
+    toml: Option<&WalletToml>,
+    cli_account: Option<u32>,
+    seed_phrase: Option<String>,
+) -> Option<WalletConfig> {
+    if toml.is_none() && cli_account.is_none() && seed_phrase.is_none() {
+        return None;
+    }
+    let mut cfg = WalletConfig::default_shape();
+    if let Some(t) = toml {
+        if let Some(c) = t.coin_type {
+            cfg.coin_type = c;
+        }
+        if let Some(a) = t.account {
+            cfg.account = a;
+        }
+        if let Some(intent) = t.intent {
+            if let Some(r) = intent.role {
+                cfg.intent.role = r;
+            }
+            if let Some(i) = intent.index {
+                cfg.intent.index = i;
+            }
+        }
+        if let Some(payment) = t.payment {
+            if let Some(r) = payment.role {
+                cfg.payment.role = r;
+            }
+            if let Some(i) = payment.index {
+                cfg.payment.index = i;
+            }
+        }
+    }
+    // CLI account wins over TOML account.
+    if let Some(a) = cli_account {
+        cfg.account = a;
+    }
+    cfg.seed_phrase = seed_phrase;
+    Some(cfg)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Canonical BIP-39 12-word test vector ("abandon×11 + about").
+    const CANONICAL_MNEMONIC: &str =
+        "abandon abandon abandon abandon abandon abandon abandon abandon \
+         abandon abandon abandon about";
 
     #[test]
     fn default_is_local() {
@@ -430,7 +626,7 @@ mod tests {
         let cfg = SettlementConfig::resolve_checked(
             &SettlementCliOverrides {
                 mode: Some(SettlementMode::Dumbnet),
-                seed_phrase: Some("test seed phrase for key derivation".into()),
+                seed_phrase: Some(CANONICAL_MNEMONIC.into()),
                 ..Default::default()
             },
             &toml,
@@ -440,6 +636,12 @@ mod tests {
         assert!(cfg.signing_key.is_some());
         assert!(cfg.auto_submit);
         assert_eq!(cfg.accept_timeout_secs, 900);
+        // The seed phrase plumbed through into `wallet`.
+        assert!(cfg.wallet.is_some());
+        assert_eq!(
+            cfg.wallet.as_ref().unwrap().seed_phrase.as_deref(),
+            Some(CANONICAL_MNEMONIC)
+        );
     }
 
     #[test]
@@ -466,19 +668,23 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Forward-compat fields (Phase 0 W4-5): account / role round-trip.
+    // Nested [wallet] / [wallet.intent] / [wallet.payment] resolution.
     //
-    // These verify the new optional `account` and `role` fields plumb through
-    // CLI > TOML > resolved config without affecting any other behavior.
-    // The fields are silently ignored by signing/keygen; the W6-8
-    // `vesl-wallet` typed API will start consuming them.
+    // Replaces the earlier flat `account`/`role` round-trip tests; the
+    // shape they were a forward-compat seam for now lives in the nested
+    // WalletToml structure.
     // -----------------------------------------------------------------------
 
     #[test]
-    fn account_role_roundtrip_through_toml() {
+    fn wallet_nested_round_trip_through_toml() {
         let toml = SettlementToml {
-            account: Some(7),
-            role: Some(4),
+            wallet: Some(WalletToml {
+                seed_phrase: Some(CANONICAL_MNEMONIC.into()),
+                coin_type: Some(0xABCD_1234),
+                account: Some(7),
+                intent: Some(WalletRoleToml { role: Some(2), index: Some(11) }),
+                payment: Some(WalletRoleToml { role: Some(4), index: Some(99) }),
+            }),
             ..Default::default()
         };
         let cfg = SettlementConfig::resolve_checked(
@@ -487,33 +693,65 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(cfg.account, Some(7));
-        assert_eq!(cfg.role, Some(4));
+        let w = cfg.wallet.expect("wallet config should resolve");
+        assert_eq!(w.coin_type, 0xABCD_1234);
+        assert_eq!(w.account, 7);
+        assert_eq!(w.intent.role, 2);
+        assert_eq!(w.intent.index, 11);
+        assert_eq!(w.payment.role, 4);
+        assert_eq!(w.payment.index, 99);
+        assert_eq!(w.seed_phrase.as_deref(), Some(CANONICAL_MNEMONIC));
     }
 
     #[test]
-    fn account_role_cli_overrides_toml() {
+    fn wallet_cli_account_overrides_toml() {
         let toml = SettlementToml {
-            account: Some(1),
-            role: Some(0),
+            wallet: Some(WalletToml {
+                account: Some(1),
+                ..Default::default()
+            }),
             ..Default::default()
         };
         let cfg = SettlementConfig::resolve_checked(
             &SettlementCliOverrides {
                 account: Some(99),
-                role: Some(4),
                 ..Default::default()
             },
             &toml,
             None,
         )
         .unwrap();
-        assert_eq!(cfg.account, Some(99));
-        assert_eq!(cfg.role, Some(4));
+        let w = cfg.wallet.expect("wallet config should resolve");
+        assert_eq!(w.account, 99);
     }
 
     #[test]
-    fn account_role_default_none_when_omitted() {
+    fn wallet_defaults_apply_when_omitted() {
+        let toml = SettlementToml {
+            wallet: Some(WalletToml {
+                // No fields set — every default applies.
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let cfg = SettlementConfig::resolve_checked(
+            &SettlementCliOverrides::default(),
+            &toml,
+            None,
+        )
+        .unwrap();
+        let w = cfg.wallet.expect("wallet config should resolve");
+        assert_eq!(w.coin_type, VESL_COIN_TYPE_PLACEHOLDER);
+        assert_eq!(w.account, 0);
+        assert_eq!(w.intent.role, ROLE_INTENT);
+        assert_eq!(w.intent.index, 0);
+        assert_eq!(w.payment.role, ROLE_X402);
+        assert_eq!(w.payment.index, 0);
+        assert!(w.seed_phrase.is_none());
+    }
+
+    #[test]
+    fn wallet_omitted_yields_no_resolved_wallet() {
         let toml = SettlementToml::default();
         let cfg = SettlementConfig::resolve_checked(
             &SettlementCliOverrides::default(),
@@ -521,7 +759,28 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(cfg.account, None);
-        assert_eq!(cfg.role, None);
+        assert!(cfg.wallet.is_none());
+    }
+
+    #[test]
+    fn intent_and_payment_signers_resolve_distinct_keys() {
+        // The TOML config-toggle pattern: same SettlementConfig, intent
+        // and payment signers derive different scalars.
+        let toml = SettlementToml {
+            wallet: Some(WalletToml {
+                seed_phrase: Some(CANONICAL_MNEMONIC.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let cfg = SettlementConfig::resolve_checked(
+            &SettlementCliOverrides::default(),
+            &toml,
+            None,
+        )
+        .unwrap();
+        let intent = cfg.intent_signer_belts().unwrap().expect("intent key");
+        let payment = cfg.payment_signer_belts().unwrap().expect("payment key");
+        assert_ne!(intent, payment);
     }
 }
