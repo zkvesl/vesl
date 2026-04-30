@@ -3,7 +3,7 @@ name = "nockchain-client-rs"
 version = "0.1.0"
 edition = "2024"
 description = "Nockchain gRPC client — chain queries, wallet coordination, NoteData encoding for NockApp developers"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Nockchain monorepo crates — path-dep to sibling ../nockchain clone.

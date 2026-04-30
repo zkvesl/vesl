@@ -3,7 +3,7 @@ name = "nockchain-tip5-rs"
 version = "0.1.0"
 edition = "2024"
 description = "Standalone tip5 Merkle tree — hash functions, tree construction, proof generation and verification with test vectors"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Nockchain monorepo crate — path-dep to sibling ../nockchain clone.
