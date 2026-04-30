@@ -3,7 +3,7 @@
 # Priority 80, fourth graft in the 50–99 state-graft band.
 # `after = ["queue-graft"]` keeps state-band ordering explicit.
 #
-# Two poke arms (causes carry `(list @t)` for Rust ergonomics; the
+# Two poke arms (causes carry `(list @t)` for Rust API shape; the
 # graft `silt`s into the internal `(set @t)` on the way in):
 #   %rbac-grant  — union with held perms; surfaces added (set diff)
 #                  in the effect rather than the full perms set.

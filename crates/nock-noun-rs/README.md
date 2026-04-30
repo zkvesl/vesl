@@ -2,7 +2,7 @@
 
 > You shouldn't need to read 57,000 lines of wallet code to build a cell.
 
-Ergonomic Nock noun construction from Rust. The missing manual for
+High-level Nock noun construction from Rust. The missing manual for
 `NockStack`, `NounSlab`, and the sharp edges between them.
 
 ## Why this exists

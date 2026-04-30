@@ -1,6 +1,6 @@
 //! Nockchain public gRPC client — transaction submission, balance queries, polling.
 //!
-//! Wraps `PublicNockchainGrpcClient` with ergonomic methods for the operations
+//! Wraps `PublicNockchainGrpcClient` with high-level methods for the operations
 //! every NockApp needs: submit a transaction, wait for it to land in a block,
 //! and query balances.
 //!

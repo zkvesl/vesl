@@ -1,4 +1,4 @@
-//! Ergonomic Nock noun construction from Rust.
+//! High-level Nock noun construction from Rust.
 //!
 //! Provides helpers for building Nock nouns without wrestling the raw
 //! NockStack / NounSlab APIs directly. Covers the patterns every NockApp
