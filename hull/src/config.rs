@@ -29,6 +29,15 @@ pub struct HullConfig {
     pub tx_fee: Option<u64>,
     pub coinbase_timelock_min: Option<u64>,
     pub accept_timeout_secs: Option<u64>,
+    /// Forward-compat (Phase 0 W4-5): per-agent BIP44 account index. Consumed
+    /// at W6-8 by the `vesl-wallet` typed API. Hull authors can set this in
+    /// `vesl.toml` today to be future-ready; currently passed through without
+    /// affecting key derivation.
+    pub account: Option<u32>,
+    /// Forward-compat (Phase 0 W4-5): BIP44 role per `vesl-wallet-spec`.
+    /// Use `vesl_core::ROLE_INTENT` (0), `ROLE_X402` (4), etc. Consumed at
+    /// W6-8 by the `vesl-wallet` typed API.
+    pub role: Option<u32>,
 }
 
 impl From<&HullConfig> for SettlementToml {
@@ -39,6 +48,8 @@ impl From<&HullConfig> for SettlementToml {
             tx_fee: v.tx_fee,
             coinbase_timelock_min: v.coinbase_timelock_min,
             accept_timeout_secs: v.accept_timeout_secs,
+            account: v.account,
+            role: v.role,
         }
     }
 }

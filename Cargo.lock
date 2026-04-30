@@ -6559,6 +6559,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "vesl-signing",
+ "vesl-wallet-spec",
  "zeroize",
 ]
 
@@ -6571,6 +6572,10 @@ dependencies = [
  "once_cell",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "vesl-wallet-spec"
+version = "0.0.0"
 
 [[package]]
 name = "virtue"

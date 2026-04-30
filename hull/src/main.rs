@@ -111,6 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             coinbase_timelock_min: cli.coinbase_timelock_min,
             accept_timeout: cli.accept_timeout,
             seed_phrase,
+            ..Default::default()
         },
         &toml_cfg,
     )

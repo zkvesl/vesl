@@ -21,6 +21,14 @@ nockchain-client-rs = { path = "../nockchain-client-rs" }
 # once vesl-identity ships.
 vesl-signing = { path = "../../../vesl-identity/crates/vesl-signing", default-features = false }
 
+# Vesl wallet derivation spec — Phase 0 W4-5 (per
+# `vesl-labs/docs/plans/shared-infrastructure/10-PHASE-0-NOW.md`).
+# Doc-only crate exposing role constants + `DerivationPath`. No
+# derivation logic — that lives in `vesl-wallet` (Phase 0 W6-8).
+# Path-dep during local development; switch to git-dep with v0.1.0
+# alongside vesl-signing once end-to-end verification ships.
+vesl-wallet-spec = { path = "../../../vesl-identity/crates/vesl-wallet-spec", default-features = false }
+
 # Nockchain monorepo crates — path-dep to sibling ../nockchain clone.
 nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }
 nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }

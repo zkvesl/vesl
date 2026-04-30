@@ -44,6 +44,15 @@ pub use mint::MintError;
 pub use settle::RagVerifier;
 pub use signing::{SigningError, derive_pubkey, pubkey_hash, sign, key_from_seed_phrase};
 pub use config::{SettlementMode, SettlementConfig, SettlementToml};
+
+// Vesl wallet derivation spec — BIP44 5-level layout. Re-exported from the
+// `vesl-identity` bundle so Hull authors get role constants and the typed
+// `DerivationPath` via `use vesl_core::*` without depending on the spec
+// crate directly. Phase 0 W4-5.
+pub use vesl_wallet_spec::{
+    BIP44_PURPOSE, DerivationPath,
+    ROLE_INTENT, ROLE_RECEIVING, ROLE_ENCRYPTION, ROLE_SESSION, ROLE_X402,
+};
 pub use verify_tx::{fetch_receipt, TxInputView, TxOutputView, TxReceipt, VerifyTxError};
 
 // Graft poke builders — used by callers that compose grafted kernels via

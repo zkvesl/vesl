@@ -58,6 +58,12 @@ impl std::str::FromStr for SettlementMode {
 /// Settlement-related fields from a TOML config file.
 ///
 /// Domain hulls embed these in their own config struct and convert via `From`.
+///
+/// `account` and `role` are forward-compat placeholders for the W6-8
+/// `vesl-wallet` typed API. They land at W4-5 alongside `vesl-wallet-spec`
+/// so Hull authors can start writing nockup.toml in the W6-8 shape today.
+/// Currently silently passed through to the resolved config without affecting
+/// signing or keygen.
 #[derive(Debug, Default)]
 pub struct SettlementToml {
     pub settlement_mode: Option<String>,
@@ -65,6 +71,10 @@ pub struct SettlementToml {
     pub tx_fee: Option<u64>,
     pub coinbase_timelock_min: Option<u64>,
     pub accept_timeout_secs: Option<u64>,
+    /// Forward-compat: per-agent BIP44 account index (consumed at W6-8 by `vesl-wallet`).
+    pub account: Option<u32>,
+    /// Forward-compat: BIP44 role per `vesl-wallet-spec` (consumed at W6-8 by `vesl-wallet`).
+    pub role: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +95,10 @@ pub struct SettlementCliOverrides {
     pub coinbase_timelock_min: Option<u64>,
     pub accept_timeout: Option<u64>,
     pub seed_phrase: Option<String>,
+    /// Forward-compat: per-agent BIP44 account index (consumed at W6-8 by `vesl-wallet`).
+    pub account: Option<u32>,
+    /// Forward-compat: BIP44 role per `vesl-wallet-spec` (consumed at W6-8 by `vesl-wallet`).
+    pub role: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +120,15 @@ pub struct SettlementConfig {
     /// How long to wait for TX acceptance before giving up (seconds).
     /// Fakenet: 300s, dumbnet: 900s (blocks are ~10min).
     pub accept_timeout_secs: u64,
+    /// Forward-compat: per-agent BIP44 account index. Currently passed through
+    /// from CLI/TOML without affecting `signing_key` derivation. The W6-8
+    /// `vesl-wallet` typed API will consume this to derive role-specific keys.
+    pub account: Option<u32>,
+    /// Forward-compat: BIP44 role per `vesl-wallet-spec`. Currently passed
+    /// through from CLI/TOML without affecting `signing_key` derivation. The
+    /// W6-8 `vesl-wallet` typed API will consume this to derive role-specific
+    /// keys (e.g., `ROLE_INTENT` for intent apps, `ROLE_X402` for payment apps).
+    pub role: Option<u32>,
 }
 
 impl SettlementConfig {
@@ -119,6 +142,8 @@ impl SettlementConfig {
             tx_fee: 256,
             auto_submit: false,
             accept_timeout_secs: 0,
+            account: None,
+            role: None,
         }
     }
 
@@ -155,8 +180,19 @@ impl SettlementConfig {
                 }
             });
 
+        // Forward-compat fields (W4-5): account/role flow through from
+        // CLI > TOML for every mode. Currently unused by signing/keygen —
+        // consumed by the W6-8 `vesl-wallet` typed API.
+        let account = overrides.account.or(toml.account);
+        let role = overrides.role.or(toml.role);
+
         match mode {
-            SettlementMode::Local => Ok(Self::local()),
+            SettlementMode::Local => {
+                let mut cfg = Self::local();
+                cfg.account = account;
+                cfg.role = role;
+                Ok(cfg)
+            }
 
             SettlementMode::Fakenet => Ok(Self {
                 mode: SettlementMode::Fakenet,
@@ -178,6 +214,8 @@ impl SettlementConfig {
                     .accept_timeout
                     .or(toml.accept_timeout_secs)
                     .unwrap_or(300),
+                account,
+                role,
             }),
 
             SettlementMode::Dumbnet => {
@@ -218,6 +256,8 @@ impl SettlementConfig {
                         .accept_timeout
                         .or(toml.accept_timeout_secs)
                         .unwrap_or(900),
+                    account,
+                    role,
                 })
             }
         }
@@ -423,5 +463,65 @@ mod tests {
             let parsed: SettlementMode = s.parse().unwrap();
             assert_eq!(mode, parsed);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Forward-compat fields (Phase 0 W4-5): account / role round-trip.
+    //
+    // These verify the new optional `account` and `role` fields plumb through
+    // CLI > TOML > resolved config without affecting any other behavior.
+    // The fields are silently ignored by signing/keygen; the W6-8
+    // `vesl-wallet` typed API will start consuming them.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn account_role_roundtrip_through_toml() {
+        let toml = SettlementToml {
+            account: Some(7),
+            role: Some(4),
+            ..Default::default()
+        };
+        let cfg = SettlementConfig::resolve_checked(
+            &SettlementCliOverrides::default(),
+            &toml,
+            None,
+        )
+        .unwrap();
+        assert_eq!(cfg.account, Some(7));
+        assert_eq!(cfg.role, Some(4));
+    }
+
+    #[test]
+    fn account_role_cli_overrides_toml() {
+        let toml = SettlementToml {
+            account: Some(1),
+            role: Some(0),
+            ..Default::default()
+        };
+        let cfg = SettlementConfig::resolve_checked(
+            &SettlementCliOverrides {
+                account: Some(99),
+                role: Some(4),
+                ..Default::default()
+            },
+            &toml,
+            None,
+        )
+        .unwrap();
+        assert_eq!(cfg.account, Some(99));
+        assert_eq!(cfg.role, Some(4));
+    }
+
+    #[test]
+    fn account_role_default_none_when_omitted() {
+        let toml = SettlementToml::default();
+        let cfg = SettlementConfig::resolve_checked(
+            &SettlementCliOverrides::default(),
+            &toml,
+            None,
+        )
+        .unwrap();
+        assert_eq!(cfg.account, None);
+        assert_eq!(cfg.role, None);
     }
 }
