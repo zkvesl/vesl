@@ -12,8 +12,13 @@ pub use nockchain_tip5_rs::{
 // Chain/wallet clients (for Settle/Forge users)
 pub use nockchain_client_rs::{ChainClient, ChainConfig, WalletClient, WalletConfig};
 
-// Noun building (for CommitmentVerifier trait)
-pub use nock_noun_rs::NounSlab;
+// Noun building. Re-exported as a type alias with the default jammer
+// bound. The underlying `nockapp::NounSlab` is generic over `J: Jammer`;
+// rustc can't always infer the default inside closures, so consumers
+// writing `let mut s = NounSlab::new();` get inference-friendly behavior
+// with no annotation. Internal vesl-core callers continue to import via
+// `nock_noun_rs::NounSlab` (same underlying type).
+pub type NounSlab = nockapp::noun::slab::NounSlab<nockapp::noun::slab::NockJammer>;
 
 // Vesl domain types — mirrors of sur/vesl.hoon
 use serde::{Deserialize, Serialize};

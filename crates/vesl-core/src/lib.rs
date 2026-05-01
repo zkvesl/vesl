@@ -18,6 +18,7 @@ pub mod guard;
 pub mod mint;
 pub mod forge;
 pub mod graft_pokes;
+pub mod peek;
 pub mod signing;
 pub mod types;
 pub mod verify_tx;
@@ -102,3 +103,10 @@ pub use graft_pokes::clock::build_clock_tick_poke;
 pub use graft_pokes::log::build_log_append_poke;
 pub use graft_pokes::validate::{build_validate_clear_poke, build_validate_init_poke, Rule as ValidateRule};
 pub use graft_pokes::batch::{build_batch_add_poke, build_batch_flush_poke, build_batch_init_poke};
+
+// Peek-path builders + result decoders. See the `peek` module and
+// zkvesl-docs `reference/sdk.md` "Peek calls from Rust" for usage.
+pub use peek::{
+    build_hull_peek_path, build_keyed_peek_path, build_keyless_peek_path,
+    peek_loobean, unwrap_triple_unit_atom,
+};
