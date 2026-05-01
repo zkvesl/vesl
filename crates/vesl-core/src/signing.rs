@@ -301,6 +301,7 @@ fn vesl_point_to_nock(p: &VeslCheetahPoint) -> NockCheetahPoint {
 // Inverse direction — kept available for the round-trip test below
 // (`point_conversion_roundtrip`) and for any future shim that needs to
 // reach `vesl_signing::schnorr` primitives that take `VeslCheetahPoint`.
+#[allow(dead_code)]
 fn nock_point_to_vesl(p: &NockCheetahPoint) -> VeslCheetahPoint {
     VeslCheetahPoint {
         x: VeslF6lt(std::array::from_fn(|i| VeslBelt(p.x.0[i].0))),

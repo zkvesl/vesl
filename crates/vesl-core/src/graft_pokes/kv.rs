@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn long_key_does_not_panic() {
-        let key: String = std::iter::repeat('k').take(1024).collect();
+        let key = "k".repeat(1024);
         let _slab = build_kv_set_poke(&key, b"v");
         let _slab2 = build_kv_delete_poke(&key);
     }
