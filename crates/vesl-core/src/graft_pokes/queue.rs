@@ -11,7 +11,7 @@
 //! specific shape validation belongs in a Phase 03 validate-graft,
 //! not here.
 
-use nock_noun_rs::{make_atom_in, make_tag_in, NounSlab};
+use nock_noun_rs::{jam_to_bytes, make_atom_in, make_tag_in, new_stack, slab_root, NounSlab};
 use nockvm::noun::T;
 
 /// Build a `[%queue-push payload=@]` poke.
@@ -26,6 +26,20 @@ pub fn build_queue_push_poke(body_jammed: &[u8]) -> NounSlab {
     let poke = T(&mut slab, &[tag, payload]);
     slab.set_root(poke);
     slab
+}
+
+/// Build a `[%queue-push payload=@]` poke from an in-process noun.
+///
+/// Caller constructs the body in `body` (their own `NounSlab`),
+/// calls `body.set_root(...)`, and hands the slab in. We jam the
+/// root and delegate to `build_queue_push_poke`. Use this when the
+/// body originates in-process; for forwarding bytes from a cue-
+/// emitting graft, see `vesl_core::rejam_atom` plus the byte-taking
+/// builder.
+pub fn build_queue_push_poke_from_noun(body: &NounSlab) -> NounSlab {
+    let mut stack = new_stack();
+    let jammed = jam_to_bytes(&mut stack, slab_root(body));
+    build_queue_push_poke(&jammed)
 }
 
 /// Build a `[%queue-pop ~]` poke.
@@ -84,5 +98,32 @@ mod tests {
     fn large_body_does_not_panic() {
         let body: Vec<u8> = (0..32_768).map(|i| (i & 0xff) as u8).collect();
         let _slab = build_queue_push_poke(&body);
+    }
+
+    #[test]
+    fn from_noun_matches_byte_path() {
+        // Build the body noun in a slab; jam it; both paths must
+        // produce byte-equal pokes.
+        let mut body_slab = NounSlab::new();
+        let tag = make_tag_in(&mut body_slab, "work");
+        let id = nock_noun_rs::atom_from_u64(&mut body_slab, 42);
+        let body = T(&mut body_slab, &[tag, id]);
+        body_slab.set_root(body);
+
+        let mut stack = new_stack();
+        let body_bytes = jam_to_bytes(&mut stack, slab_root(&body_slab));
+        let from_bytes = build_queue_push_poke(&body_bytes);
+        let from_noun = build_queue_push_poke_from_noun(&body_slab);
+
+        let bytes_a = jam_to_bytes(&mut new_stack(), slab_root(&from_bytes));
+        let bytes_b = jam_to_bytes(&mut new_stack(), slab_root(&from_noun));
+        assert_eq!(bytes_a, bytes_b);
+    }
+
+    #[test]
+    fn from_noun_handles_zero_root() {
+        let mut body_slab = NounSlab::new();
+        body_slab.set_root(nockvm::noun::D(0));
+        let _slab = build_queue_push_poke_from_noun(&body_slab);
     }
 }

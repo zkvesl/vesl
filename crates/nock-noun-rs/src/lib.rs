@@ -169,6 +169,33 @@ pub fn cue_from_bytes(stack: &mut NockStack, bytes: &[u8]) -> Option<Noun> {
     cue(stack, a).ok()
 }
 
+/// Re-jam an atom whose bytes came from a cue-emitting graft (e.g.,
+/// `%queue-popped` body) so the same bytes can be fed to a
+/// cue-consuming graft (e.g., `%batch-add`) without round-trip
+/// double-cue corruption.
+///
+/// Cross-graft seam helper. State-grafts that store opaque payloads
+/// (queue, log, batch, registry) cue their input on entry and emit
+/// the resulting noun back unchanged. Walking that noun's bytes via
+/// `as_ne_bytes()` returns the *atom* representation, not a fresh
+/// jam encoding — feeding those bytes verbatim into another cue-
+/// consuming graft fails (or, on pathological back-refs, hangs the
+/// kernel inside `cue`). `rejam_atom` cues the bytes and re-jams the
+/// resulting noun so the next graft's `cue` succeeds.
+///
+/// Canonicalizes: input bytes and output bytes both encode the same
+/// noun, but they may not be byte-identical. Jam isn't a canonical
+/// encoding — different jammers may pick different back-ref
+/// schedules. The output is canonical under nockvm's jammer.
+///
+/// Panics if `bytes` is not valid jam.
+pub fn rejam_atom(bytes: &[u8]) -> Vec<u8> {
+    let mut stack = new_stack();
+    let noun = cue_from_bytes(&mut stack, bytes)
+        .expect("rejam_atom: input is not valid jam");
+    jam_to_bytes(&mut stack, noun)
+}
+
 // ---------------------------------------------------------------------------
 // Generic-allocator builders — work with NockStack or NounSlab
 // ---------------------------------------------------------------------------
@@ -312,5 +339,57 @@ mod tests {
         slab.set_root(cause);
         // Just verify it doesn't panic — slab nouns can't be inspected
         // the same way as stack nouns without converting.
+    }
+
+    #[test]
+    fn rejam_atom_canonicalizes_atom() {
+        let mut stack = new_stack();
+        let bytes = jam_to_bytes(&mut stack, D(42));
+        let rejammed = rejam_atom(&bytes);
+        let cued = cue_from_bytes(&mut new_stack(), &rejammed).expect("rejam output cues");
+        assert_eq!(cued.as_atom().unwrap().as_u64().unwrap(), 42);
+    }
+
+    #[test]
+    fn rejam_atom_canonicalizes_cell() {
+        let mut stack = new_stack();
+        let cell = T(&mut stack, &[D(1), D(2), D(3)]);
+        let bytes = jam_to_bytes(&mut stack, cell);
+        let rejammed = rejam_atom(&bytes);
+        let mut s2 = new_stack();
+        let cued = cue_from_bytes(&mut s2, &rejammed).expect("rejam output cues");
+        let c1 = cued.as_cell().unwrap();
+        assert_eq!(c1.head().as_atom().unwrap().as_u64().unwrap(), 1);
+        let c2 = c1.tail().as_cell().unwrap();
+        assert_eq!(c2.head().as_atom().unwrap().as_u64().unwrap(), 2);
+        assert_eq!(c2.tail().as_atom().unwrap().as_u64().unwrap(), 3);
+    }
+
+    #[test]
+    fn rejam_atom_canonicalizes_indirect() {
+        // Large indirect atom — jam encoding spans multiple bytes;
+        // round-trip through cue+jam must preserve the value.
+        let payload: Vec<u8> = (0..1024).map(|i| (i & 0xff) as u8).collect();
+        let mut stack = new_stack();
+        let big = make_atom(&mut stack, &payload);
+        let bytes = jam_to_bytes(&mut stack, big);
+        let rejammed = rejam_atom(&bytes);
+        // Both jams cue back to the same atom value.
+        let mut s2 = new_stack();
+        let original = cue_from_bytes(&mut s2, &bytes).expect("original cues");
+        let mut s3 = new_stack();
+        let canonical = cue_from_bytes(&mut s3, &rejammed).expect("rejam cues");
+        assert_eq!(
+            original.as_atom().unwrap().as_ne_bytes(),
+            canonical.as_atom().unwrap().as_ne_bytes(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "rejam_atom: input is not valid jam")]
+    fn rejam_atom_panics_on_malformed() {
+        // 0xff has the high bit pattern of a valid jam prefix but no
+        // backing data — cue rejects.
+        let _ = rejam_atom(&[0xff, 0xff]);
     }
 }

@@ -94,15 +94,25 @@ pub use graft_pokes::counter::{
 };
 pub use graft_pokes::queue::{
     build_queue_clear_poke, build_queue_pop_poke, build_queue_push_poke,
+    build_queue_push_poke_from_noun,
 };
 pub use graft_pokes::rbac::{build_rbac_grant_poke, build_rbac_revoke_poke};
 pub use graft_pokes::registry::{
     build_registry_del_poke, build_registry_put_poke, build_registry_update_poke,
 };
 pub use graft_pokes::clock::build_clock_tick_poke;
-pub use graft_pokes::log::build_log_append_poke;
+pub use graft_pokes::log::{build_log_append_poke, build_log_append_poke_from_noun};
 pub use graft_pokes::validate::{build_validate_clear_poke, build_validate_init_poke, Rule as ValidateRule};
-pub use graft_pokes::batch::{build_batch_add_poke, build_batch_flush_poke, build_batch_init_poke};
+pub use graft_pokes::batch::{
+    build_batch_add_poke, build_batch_add_poke_from_noun, build_batch_flush_poke,
+    build_batch_init_poke,
+};
+
+// Cross-graft seam helper: cue-then-jam canonicalization for bytes
+// pulled from cue-emitting grafts (e.g., %queue-popped body) before
+// they're forwarded into cue-consuming grafts (%batch-add, %log-append,
+// %registry-put). See zkvesl-docs/reference/sdk.md "Cross-graft pipelines".
+pub use nock_noun_rs::rejam_atom;
 
 // Peek-path builders + result decoders. See the `peek` module and
 // zkvesl-docs `reference/sdk.md` "Peek calls from Rust" for usage.

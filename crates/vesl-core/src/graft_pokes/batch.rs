@@ -15,7 +15,9 @@
 //! re-cues inside its poke arm. Wrap is the canonical mule pattern
 //! from queue-graft / log-graft.
 
-use nock_noun_rs::{atom_from_u64, make_atom_in, make_tag_in, NounSlab};
+use nock_noun_rs::{
+    atom_from_u64, jam_to_bytes, make_atom_in, make_tag_in, new_stack, slab_root, NounSlab,
+};
 use nockvm::noun::{D, T};
 
 /// Build a `[%batch-init threshold=@ud]` poke.
@@ -45,6 +47,20 @@ pub fn build_batch_add_poke(intent_jammed: &[u8]) -> NounSlab {
     let poke = T(&mut slab, &[tag, payload]);
     slab.set_root(poke);
     slab
+}
+
+/// Build a `[%batch-add payload=@]` poke from an in-process noun.
+///
+/// Caller constructs the intent in `intent` (their own `NounSlab`),
+/// calls `intent.set_root(...)`, and hands the slab in. We jam the
+/// root and delegate to `build_batch_add_poke`. Use this when the
+/// intent originates in-process; for forwarding bytes from a cue-
+/// emitting graft, see `vesl_core::rejam_atom` plus the byte-taking
+/// builder.
+pub fn build_batch_add_poke_from_noun(intent: &NounSlab) -> NounSlab {
+    let mut stack = new_stack();
+    let jammed = jam_to_bytes(&mut stack, slab_root(intent));
+    build_batch_add_poke(&jammed)
 }
 
 /// Build a `[%batch-flush ~]` poke.
@@ -107,5 +123,30 @@ mod tests {
         let mut stack = new_stack();
         let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn from_noun_matches_byte_path() {
+        let mut intent_slab = NounSlab::new();
+        let tag = make_tag_in(&mut intent_slab, "transfer");
+        let amount = atom_from_u64(&mut intent_slab, 1000);
+        let intent = T(&mut intent_slab, &[tag, amount]);
+        intent_slab.set_root(intent);
+
+        let mut stack = new_stack();
+        let intent_bytes = jam_to_bytes(&mut stack, slab_root(&intent_slab));
+        let from_bytes = build_batch_add_poke(&intent_bytes);
+        let from_noun = build_batch_add_poke_from_noun(&intent_slab);
+
+        let bytes_a = jam_to_bytes(&mut new_stack(), slab_root(&from_bytes));
+        let bytes_b = jam_to_bytes(&mut new_stack(), slab_root(&from_noun));
+        assert_eq!(bytes_a, bytes_b);
+    }
+
+    #[test]
+    fn from_noun_handles_zero_root() {
+        let mut intent_slab = NounSlab::new();
+        intent_slab.set_root(D(0));
+        let _slab = build_batch_add_poke_from_noun(&intent_slab);
     }
 }
