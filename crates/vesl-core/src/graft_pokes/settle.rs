@@ -126,11 +126,10 @@ where
 /// The hull's commitment must bind to that same pubkey encoding, i.e.
 /// `expected-root = hash-leaf(pubkey_canonical_bytes(pubkey))`.
 ///
-/// `data` carries the Schnorr-signed bytes. Per the gate's
-/// `(hash-hashable:tip5 leaf+data)` reduction, `data` is restricted to a
-/// Belt-sized atom — see [`crate::signing::schnorr_message_digest_for_data`]
-/// for the size constraint and the recommended pre-condense path for
-/// larger payloads.
+/// `data` carries the Schnorr-signed bytes — arbitrary `&[u8]`. The
+/// gate chunks `data` into 7-byte LE belts via vesl-merkle's
+/// `hash-leaf-digest`; [`crate::signing::schnorr_message_digest_for_data`]
+/// mirrors that exact reduction so the signature verifies.
 pub fn build_settle_note_schnorr_poke(
     note_id: u64,
     hull: u64,
@@ -487,7 +486,7 @@ mod tests {
     fn build_settle_note_schnorr_poke_emits_nonempty_jam() {
         let root = fixture_root();
         let (sk, pubkey) = fixture_schnorr_keypair();
-        let data: &[u8] = b"\x01\x02\x03"; // belt-sized
+        let data: &[u8] = b"attest: 32-byte hash fingerprint";
         let digest = crate::signing::schnorr_message_digest_for_data(data);
         let sig = crate::signing::sign(&sk, &digest).expect("sign");
         let slab = build_settle_note_schnorr_poke(101, 1, &root, data, &sig, &pubkey);

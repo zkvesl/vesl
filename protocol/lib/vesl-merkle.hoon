@@ -16,6 +16,11 @@
 ::                    for commitment, by guard for leaf check,
 ::                    by settle's default verify-gate, by forge
 ::                    for Fiat-Shamir leaf binding.
+::    hash-leaf-digest  same hash as hash-leaf, but returned as a
+::                    noun-digest:tip5 instead of a flat atom.  Used
+::                    where a downstream sponge consumer wants the
+::                    5-belt shape directly (e.g. schnorr verify's
+::                    message digest).
 ::    hash-pair       tip5 pair hash of two digest atoms.  Used
 ::                    inside verify-chunk and by any graft that
 ::                    folds up an internal Merkle node.
@@ -68,6 +73,20 @@
   =/  belts=(list @)  (split-to-belts dat)
   =/  n=@  (lent belts)
   (digest-to-atom:tip5 (hash-belts-list:tip5 [n belts]))
+::
+::  +hash-leaf-digest: tip5 hash of raw leaf data, as a digest
+::
+::  Same chunking + sponge as hash-leaf, returned as the 5-belt
+::  noun-digest:tip5 without the digest-to-atom step.  Use when the
+::  consumer is itself a sponge (schnorr verify's message digest,
+::  for instance) instead of a flat-atom commitment.
+::
+++  hash-leaf-digest
+  |=  dat=@
+  ^-  noun-digest:tip5
+  =/  belts=(list @)  (split-to-belts dat)
+  =/  n=@  (lent belts)
+  (hash-belts-list:tip5 [n belts])
 ::
 ::  +hash-pair: tip5 pair hash of two digest atoms
 ::

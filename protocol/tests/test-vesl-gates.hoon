@@ -184,7 +184,7 @@
 =/  sch-pk=@ux                (ser-a-pt:cheetah sch-pk-pt)
 =/  sch-msg                   'attest: revenue Q3 = $47M'
 =/  sch-digest=noun-digest:tip5
-  (hash-hashable:tip5 leaf+sch-msg)
+  (hash-leaf-digest sch-msg)
 =/  sch-cs=[chal=@ux s=@ux]
   (sign:affine:schnorr:cheetah sch-sk-belts sch-digest)
 =/  sch-sig=@                 (cat 8 s.sch-cs chal.sch-cs)

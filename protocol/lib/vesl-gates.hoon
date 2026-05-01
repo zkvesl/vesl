@@ -93,7 +93,7 @@
       ;;([data=@ sig=@ pubkey=@] data)
     ?&  =((hash-leaf pubkey.p) expected-root)
         =/  pk=a-pt:curve:cheetah  (de-a-pt:cheetah pubkey.p)
-        =/  m=noun-digest:tip5     (hash-hashable:tip5 leaf+data.p)
+        =/  m=noun-digest:tip5     (hash-leaf-digest data.p)
         =/  chal=@                 (rsh 8 sig.p)
         =/  s=@                    (end 8 sig.p)
         (verify:affine:schnorr:cheetah pk m chal s)
