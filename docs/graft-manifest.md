@@ -288,7 +288,7 @@ gate-chain = ["sig-verify-ed25519", "manifest-verify"]  # AND-fold composition
 When set, the composer rewrites the manifest's `[graft.blocks.poke]`
 body: every default 4-line `=/  hash-gate=verify-gate ... =((hash-leaf
 ;;(@ data)) expected-root)` block is replaced with a binding to the
-selected gate, and `[graft.blocks.imports]` gains a `/+  *vesl-gates`
+selected gate, and `[graft.blocks.imports]` gains a `/+  vesl-gates`
 line if it wasn't there already. The manifest itself is left on disk
 unchanged; the rewrite runs in memory at inject time.
 
@@ -339,7 +339,9 @@ gate = "sig-verify-ed25519"
 #
 #   =/  hash-gate=verify-gate  sig-verify-ed25519:vesl-gates
 #
-# and prepends `/+  *vesl-gates` to the imports body.
+# and prepends `/+  vesl-gates` to the imports body. Non-splat: the
+# qualified `name:vesl-gates` body needs `vesl-gates` to remain a
+# namespace identifier.
 ```
 
 ## Migration: vesl-graft → settle-graft
