@@ -137,6 +137,75 @@ pub fn pubkey_hash(pk: &SchnorrPubkey) -> Hash {
     Hash::from_limbs(&digest)
 }
 
+/// Return the canonical 97-byte serialization of a Schnorr public key.
+///
+/// Wire shape produced by Hoon's `ser-a-pt:cheetah`:
+/// `[0x01, y5, y4, y3, y2, y1, y0, x5, x4, x3, x2, x1, x0]` with each Belt
+/// encoded as 8 big-endian bytes. This is the byte form the
+/// `sig-verify-schnorr` gate expects in its `pubkey` payload field, and
+/// the form the catalog's PKH commitment binds to.
+///
+/// Panics only on the point at infinity, which a `SchnorrPubkey` produced
+/// by [`derive_pubkey`] cannot reach (`g * sk` for `sk` in `(0, G_ORDER)`
+/// is never the identity). Callers that hold a `SchnorrPubkey` decoded
+/// from untrusted input should check `pk.0.inf == false` first.
+pub fn pubkey_canonical_bytes(pk: &SchnorrPubkey) -> Vec<u8> {
+    let vesl_pt = nock_point_to_vesl(&pk.0);
+    vesl_pt
+        .to_bytes()
+        .expect("valid SchnorrPubkey is never the point at infinity")
+        .to_vec()
+}
+
+/// Pack a Schnorr signature into the gate's wire atom: `(chal << 256) | s`.
+///
+/// The `sig-verify-schnorr` gate splits this back via `(rsh 8 sig)` and
+/// `(end 8 sig)`. Returns canonical little-endian atom bytes (leading
+/// zeros stripped), matching Hoon atom serialization.
+pub fn pack_schnorr_signature(sig: &SchnorrSignature) -> Vec<u8> {
+    let chal_big = belts8_to_ubig(&sig.chal);
+    let sig_big = belts8_to_ubig(&sig.sig);
+    let packed = (chal_big << 256) | sig_big;
+    packed.to_le_bytes()
+}
+
+/// Compute the Tip5 noun-digest the `sig-verify-schnorr` gate uses as
+/// the signed message: `(hash-hashable:tip5 leaf+data)` in Hoon.
+///
+/// This is the digest a Rust caller passes to [`sign`] so the resulting
+/// signature verifies under the gate.
+///
+/// # Belt-size constraint on `data`
+///
+/// The gate reduces `(hash-hashable:tip5 leaf+data)` to
+/// `hash-noun-varlen` over the atom; the underlying `hash-varlen`
+/// asserts each leaf belt is `< Goldilocks prime` (≈ 2^64). For a flat
+/// atom, the leaf-walker produces `~[atom]` — the entire atom is one
+/// belt — so `data` itself must encode an atom strictly below the prime.
+/// In practice this means `data.len() <= 7`: any 7-byte LE value sits
+/// safely under 2^56, well inside the field. An 8-byte payload may or
+/// may not fit depending on the high byte; 9+ bytes never fits.
+///
+/// Larger payloads cause both the gate and this helper to crash with a
+/// deterministic Exit. Callers attesting more than 7 bytes must
+/// pre-condense their data into a Belt-sized fingerprint outside this
+/// helper. A structured-data gate (range proof / manifest / etc.) can
+/// lift the limitation; `sig-verify-schnorr` as shipped today cannot.
+pub fn schnorr_message_digest_for_data(data: &[u8]) -> [Belt; 5] {
+    use nock_noun_rs::make_atom_in;
+    use nockapp::noun::slab::NounSlab;
+    use nockchain_math::tip5::hash::hash_noun_varlen_digest;
+
+    let mut slab: NounSlab = NounSlab::new();
+    let atom = make_atom_in(&mut slab, data);
+    let digest = hash_noun_varlen_digest(&mut slab, atom)
+        .expect(
+            "data atom exceeds Goldilocks prime; sig-verify-schnorr accepts \
+             at most 7 bytes — see helper docstring",
+        );
+    digest.map(Belt)
+}
+
 /// Sign a message digest with a secret key.
 ///
 /// `sk`: secret key as 8 × 32-bit Belt chunks.
@@ -234,9 +303,10 @@ fn vesl_point_to_nock(p: &VeslCheetahPoint) -> NockCheetahPoint {
     }
 }
 
-// Inverse direction (kept for symmetry; not currently used by the shim
-// but available if the signing_shim_compat test grows).
-#[allow(dead_code)]
+// Inverse direction — used by `pubkey_canonical_bytes` to reach
+// `vesl_signing::CheetahPoint::to_bytes()` (the canonical 97-byte
+// `ser-a-pt:cheetah` encoding). Also kept available for any future
+// shim test that needs the round trip.
 fn nock_point_to_vesl(p: &NockCheetahPoint) -> VeslCheetahPoint {
     VeslCheetahPoint {
         x: VeslF6lt(std::array::from_fn(|i| VeslBelt(p.x.0[i].0))),
@@ -411,6 +481,83 @@ mod tests {
         let a = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
         let b = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn pubkey_canonical_bytes_is_97_bytes_with_marker_prefix() {
+        let mut sk = [Belt(0); 8];
+        sk[0] = Belt(31_415);
+        let pk = derive_pubkey(&sk);
+        let bytes = pubkey_canonical_bytes(&pk);
+        assert_eq!(bytes.len(), 97);
+        assert_eq!(bytes[0], 0x01);
+    }
+
+    #[test]
+    fn pack_schnorr_signature_round_trips() {
+        let mut sk = [Belt(0); 8];
+        sk[0] = Belt(2_718);
+        sk[1] = Belt(1_618);
+        let message = [Belt(9), Belt(8), Belt(7), Belt(6), Belt(5)];
+        let sig = sign(&sk, &message).expect("signing should succeed");
+
+        let packed = pack_schnorr_signature(&sig);
+        let packed_big = UBig::from_le_bytes(&packed);
+
+        let mask_256 = (UBig::from(1u64) << 256) - UBig::from(1u64);
+        let recovered_chal = &packed_big >> 256;
+        let recovered_sig = &packed_big & &mask_256;
+
+        assert_eq!(recovered_chal, belts8_to_ubig(&sig.chal));
+        assert_eq!(recovered_sig, belts8_to_ubig(&sig.sig));
+    }
+
+    #[test]
+    fn schnorr_message_digest_for_data_is_deterministic() {
+        // Inputs <= 7 bytes are inside the Belt range the gate enforces.
+        let a = schnorr_message_digest_for_data(b"hello!");
+        let b = schnorr_message_digest_for_data(b"hello!");
+        assert_eq!(a, b);
+        let c = schnorr_message_digest_for_data(b"HELLO!");
+        assert_ne!(a, c);
+        assert!(a.iter().any(|belt| belt.0 != 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "data atom exceeds Goldilocks prime")]
+    fn schnorr_message_digest_for_data_rejects_oversized_input() {
+        // 9 bytes always exceeds the prime regardless of the high byte;
+        // the helper must mirror the gate's belt-size constraint.
+        let _ = schnorr_message_digest_for_data(b"123456789");
+    }
+
+    #[test]
+    fn sign_against_helper_digest_round_trips() {
+        // The helper composes with sign(): produce a signature against
+        // schnorr_message_digest_for_data(b), then check the verify
+        // equation reconstructs the same challenge. Equivalence to the
+        // gate-side digest is verified end-to-end in the follow-up PR.
+        let mut sk = [Belt(0); 8];
+        sk[0] = Belt(11_111);
+        sk[1] = Belt(22_222);
+        let pubkey = derive_pubkey(&sk);
+        let digest = schnorr_message_digest_for_data(b"attest!");
+        let sig = sign(&sk, &digest).expect("signing should succeed");
+
+        let chal_big = belts8_to_ubig(&sig.chal);
+        let sig_big = belts8_to_ubig(&sig.sig);
+        let left = ch_scal_big(&sig_big, &A_GEN).expect("valid sig scalar");
+        let right = ch_neg(&ch_scal_big(&chal_big, &pubkey.0).expect("valid chal scalar"));
+        let r = ch_add(&left, &right).expect("valid point add");
+
+        let mut hashable: Vec<Belt> = Vec::with_capacity(6 * 4 + 5);
+        hashable.extend_from_slice(&r.x.0);
+        hashable.extend_from_slice(&r.y.0);
+        hashable.extend_from_slice(&pubkey.0.x.0);
+        hashable.extend_from_slice(&pubkey.0.y.0);
+        hashable.extend_from_slice(&digest);
+        let recomputed = trunc_g_order(&hash_varlen(&mut hashable));
+        assert_eq!(recomputed, chal_big);
     }
 
     #[test]

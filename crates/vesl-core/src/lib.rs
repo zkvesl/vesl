@@ -42,7 +42,10 @@ pub use types::IntentVerifier;
 pub use guard::GuardError;
 pub use mint::MintError;
 pub use settle::RagVerifier;
-pub use signing::{SigningError, derive_pubkey, pubkey_hash, sign, key_from_seed_phrase};
+pub use signing::{
+    SigningError, derive_pubkey, key_from_seed_phrase, pack_schnorr_signature, pubkey_canonical_bytes,
+    pubkey_hash, schnorr_message_digest_for_data, sign,
+};
 pub use config::{SettlementMode, SettlementConfig, SettlementToml};
 
 // Vesl wallet derivation spec — BIP44 5-level layout. Re-exported from the
@@ -72,7 +75,10 @@ pub use verify_tx::{fetch_receipt, TxInputView, TxOutputView, TxReceipt, VerifyT
 // `build_settle_*_poke` to match the `%settle-*` cause-tag rename.
 // Deprecated aliases are re-exported below for one release cycle.
 pub use graft_pokes::settle::{
-    build_settle_note_poke, build_settle_register_poke, build_settle_verify_poke,
+    build_settle_note_bounded_poke, build_settle_note_ed25519_poke,
+    build_settle_note_manifest_poke, build_settle_note_membership_poke,
+    build_settle_note_poke, build_settle_note_poke_with_data, build_settle_note_schnorr_poke,
+    build_settle_register_poke, build_settle_verify_poke, build_settle_verify_poke_with_data,
 };
 #[allow(deprecated)]
 pub use graft_pokes::settle::{

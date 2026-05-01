@@ -22,10 +22,14 @@
 //! `%settle-settle` and avoids collision with `%mint-commit`.
 
 use nock_noun_rs::{
-    atom_from_u64, jam_to_bytes, make_atom_in, make_tag_in, new_stack, NounSlab,
+    atom_from_u64, jam_to_bytes, make_atom_in, make_cord_in, make_list_in, make_loobean,
+    make_tag_in, new_stack, NounSlab,
 };
-use nockchain_tip5_rs::{tip5_to_atom_le_bytes, Tip5Hash};
+use nockchain_tip5_rs::{tip5_to_atom_le_bytes, ProofNode, Tip5Hash};
+use nockchain_types::tx_engine::common::{SchnorrPubkey, SchnorrSignature};
 use nockvm::noun::{Noun, T};
+
+use crate::signing::{pack_schnorr_signature, pubkey_canonical_bytes};
 
 /// Build a `[%settle-register hull=@ root=@]` poke.
 ///
@@ -47,13 +51,18 @@ pub fn build_settle_register_poke(hull: u64, root: &Tip5Hash) -> NounSlab {
 /// `data` is the raw payload bytes the default hash-gate will hash and
 /// compare against the registered root. For single-leaf commits, the
 /// registered root equals `hash-leaf(data)`.
+///
+/// For gate-selected settlement (sig-verify-*, manifest-verify, etc.)
+/// the gate casts `data` into a structured cell. Use
+/// [`build_settle_note_poke_with_data`] (or one of the per-gate
+/// convenience builders) to thread the structured payload through.
 pub fn build_settle_note_poke(
     note_id: u64,
     hull: u64,
     root: &Tip5Hash,
     data: &[u8],
 ) -> NounSlab {
-    build_settle_payload_poke("settle-note", note_id, hull, root, data)
+    build_settle_note_poke_with_data(note_id, hull, root, |slab| make_atom_in(slab, data))
 }
 
 /// Build a `[%settle-verify jammed-graft-payload]` poke for a single-leaf
@@ -65,7 +74,204 @@ pub fn build_settle_verify_poke(
     root: &Tip5Hash,
     data: &[u8],
 ) -> NounSlab {
-    build_settle_payload_poke("settle-verify", note_id, hull, root, data)
+    build_settle_verify_poke_with_data(note_id, hull, root, |slab| make_atom_in(slab, data))
+}
+
+/// Closure-driven `%settle-note` poke builder for catalog gates whose
+/// `data` field is a structured cell, not a flat atom.
+///
+/// `build_data` runs against the slab the poke is being assembled into
+/// and returns the data noun (cell or atom). The SDK handles the rest
+/// of the graft-payload + cause assembly.
+///
+/// This is the generic escape hatch over which the per-gate convenience
+/// builders ([`build_settle_note_schnorr_poke`],
+/// [`build_settle_note_membership_poke`], etc.) are one-liners. Use it
+/// directly for future gates that don't yet have a convenience wrapper.
+pub fn build_settle_note_poke_with_data<F>(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    build_data: F,
+) -> NounSlab
+where
+    F: FnOnce(&mut NounSlab) -> Noun,
+{
+    build_settle_payload_poke("settle-note", note_id, hull, root, build_data)
+}
+
+/// Closure-driven `%settle-verify` poke builder. See
+/// [`build_settle_note_poke_with_data`] for the closure contract.
+pub fn build_settle_verify_poke_with_data<F>(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    build_data: F,
+) -> NounSlab
+where
+    F: FnOnce(&mut NounSlab) -> Noun,
+{
+    build_settle_payload_poke("settle-verify", note_id, hull, root, build_data)
+}
+
+// -- per-gate convenience builders (Tier 1a vesl-gates) -----------------
+
+/// Build a `%settle-note` poke whose `data` cell matches the
+/// `sig-verify-schnorr` gate's expected payload:
+/// `[data=@ sig=@ pubkey=@]`.
+///
+/// `sig` is packed via [`pack_schnorr_signature`] into the gate's
+/// `(chal << 256) | s` atom shape; `pubkey` is encoded via
+/// [`pubkey_canonical_bytes`] into the 97-byte `ser-a-pt:cheetah` form.
+/// The hull's commitment must bind to that same pubkey encoding, i.e.
+/// `expected-root = hash-leaf(pubkey_canonical_bytes(pubkey))`.
+///
+/// `data` carries the Schnorr-signed bytes. Per the gate's
+/// `(hash-hashable:tip5 leaf+data)` reduction, `data` is restricted to a
+/// Belt-sized atom — see [`crate::signing::schnorr_message_digest_for_data`]
+/// for the size constraint and the recommended pre-condense path for
+/// larger payloads.
+pub fn build_settle_note_schnorr_poke(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    data: &[u8],
+    sig: &SchnorrSignature,
+    pubkey: &SchnorrPubkey,
+) -> NounSlab {
+    let sig_bytes = pack_schnorr_signature(sig);
+    let pubkey_bytes = pubkey_canonical_bytes(pubkey);
+    build_settle_note_poke_with_data(note_id, hull, root, move |slab| {
+        let data_noun = make_atom_in(slab, data);
+        let sig_noun = make_atom_in(slab, &sig_bytes);
+        let pubkey_noun = make_atom_in(slab, &pubkey_bytes);
+        T(slab, &[data_noun, sig_noun, pubkey_noun])
+    })
+}
+
+/// Build a `%settle-note` poke whose `data` cell matches the
+/// `sig-verify-ed25519` gate's expected payload:
+/// `[data=@ sig=@ pubkey=@]`.
+///
+/// All three fields are flat byte slices; vesl-core has no ed25519
+/// signing primitive, so the caller produces `sig` and `pubkey` via
+/// their own ed25519 stack (e.g., `ed25519-dalek`). The hull's
+/// commitment must equal `hash-leaf(pubkey)`.
+pub fn build_settle_note_ed25519_poke(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    data: &[u8],
+    sig: &[u8],
+    pubkey: &[u8],
+) -> NounSlab {
+    build_settle_note_poke_with_data(note_id, hull, root, move |slab| {
+        let data_noun = make_atom_in(slab, data);
+        let sig_noun = make_atom_in(slab, sig);
+        let pubkey_noun = make_atom_in(slab, pubkey);
+        T(slab, &[data_noun, sig_noun, pubkey_noun])
+    })
+}
+
+/// Build a `%settle-note` poke whose `data` cell matches the
+/// `set-membership-verify` gate's expected payload:
+/// `[elem=@ proof=(list [hash=@ side=?])]`.
+///
+/// `proof` is the merkle path from `elem`'s leaf up to the registered
+/// root. [`ProofNode`] encodes the side convention (`true` = sibling on
+/// left, `false` = sibling on right).
+pub fn build_settle_note_membership_poke(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    elem: &[u8],
+    proof: &[ProofNode],
+) -> NounSlab {
+    build_settle_note_poke_with_data(note_id, hull, root, move |slab| {
+        let elem_noun = make_atom_in(slab, elem);
+        let proof_list = build_proof_list(slab, proof);
+        T(slab, &[elem_noun, proof_list])
+    })
+}
+
+/// Build a `%settle-note` poke whose `data` cell matches the
+/// `bounded-value-verify` gate's expected payload:
+/// `[value=@ bounds=[lo=@ hi=@] proof=(list [hash=@ side=?])]`.
+///
+/// The gate verifies `verify-chunk(jam([value bounds]), proof, root)`
+/// internally, so the registered leaf must have been built from
+/// `hash-leaf(jam([value bounds]))` — `proof` is the merkle path that
+/// rebinds that leaf to `root`.
+pub fn build_settle_note_bounded_poke(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    value: u64,
+    bounds: (u64, u64),
+    proof: &[ProofNode],
+) -> NounSlab {
+    let (lo, hi) = bounds;
+    build_settle_note_poke_with_data(note_id, hull, root, move |slab| {
+        let value_noun = atom_from_u64(slab, value);
+        let lo_noun = atom_from_u64(slab, lo);
+        let hi_noun = atom_from_u64(slab, hi);
+        let bounds_noun = T(slab, &[lo_noun, hi_noun]);
+        let proof_list = build_proof_list(slab, proof);
+        T(slab, &[value_noun, bounds_noun, proof_list])
+    })
+}
+
+/// Build a `%settle-note` poke whose `data` cell matches the
+/// `manifest-verify` gate's expected payload:
+/// `[fields=(list [name=@t value=@]) proofs=(list (list [hash=@ side=?]))]`.
+///
+/// `fields` are `(cord, value)` pairs; the gate iterates pairs of
+/// `fields` and `proofs` and AND-folds `verify-chunk(value, proof, root)`
+/// over each. Length mismatch yields `%.n` (gate-side); `fields.len()
+/// != proofs.len()` here is the caller's responsibility.
+pub fn build_settle_note_manifest_poke(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    fields: &[(&[u8], &[u8])],
+    proofs: &[Vec<ProofNode>],
+) -> NounSlab {
+    build_settle_note_poke_with_data(note_id, hull, root, move |slab| {
+        let field_nouns: Vec<Noun> = fields
+            .iter()
+            .map(|(name, value)| {
+                let name_noun = make_cord_in(slab, std::str::from_utf8(name).unwrap_or(""));
+                let value_noun = make_atom_in(slab, value);
+                T(slab, &[name_noun, value_noun])
+            })
+            .collect();
+        let fields_list = make_list_in(slab, &field_nouns);
+
+        let proof_nouns: Vec<Noun> = proofs
+            .iter()
+            .map(|proof| build_proof_list(slab, proof))
+            .collect();
+        let proofs_list = make_list_in(slab, &proof_nouns);
+
+        T(slab, &[fields_list, proofs_list])
+    })
+}
+
+/// Build a `(list [hash=@ side=?])` from a slice of [`ProofNode`].
+///
+/// Shared by `set-membership-verify`, `bounded-value-verify`, and
+/// `manifest-verify`'s inner-proof shape.
+fn build_proof_list(slab: &mut NounSlab, proof: &[ProofNode]) -> Noun {
+    let nodes: Vec<Noun> = proof
+        .iter()
+        .map(|node| {
+            let hash_bytes = tip5_to_atom_le_bytes(&node.hash);
+            let hash_noun = make_atom_in(slab, &hash_bytes);
+            let side_noun = make_loobean(node.side);
+            T(slab, &[hash_noun, side_noun])
+        })
+        .collect();
+    make_list_in(slab, &nodes)
 }
 
 // -- deprecated aliases (Phase 12A) --------------------------------------
@@ -109,15 +315,19 @@ pub fn build_vesl_verify_poke(
     build_settle_verify_poke(note_id, hull, root, data)
 }
 
-fn build_settle_payload_poke(
+fn build_settle_payload_poke<F>(
     verb: &str,
     note_id: u64,
     hull: u64,
     root: &Tip5Hash,
-    data: &[u8],
-) -> NounSlab {
+    build_data: F,
+) -> NounSlab
+where
+    F: FnOnce(&mut NounSlab) -> Noun,
+{
     let mut slab = NounSlab::new();
     let tag = make_tag_in(&mut slab, verb);
+    let data = build_data(&mut slab);
     let payload = build_graft_single_leaf_payload_in(&mut slab, note_id, hull, root, data);
     let payload_bytes = {
         let mut stack = new_stack();
@@ -133,14 +343,17 @@ fn build_settle_payload_poke(
 /// `settle-graft.hoon`'s `+$graft-payload`:
 ///
 /// ```text
-/// [note=[id=@ hull=@ root=@ state=[%pending ~]] data=@ expected-root=@]
+/// [note=[id=@ hull=@ root=@ state=[%pending ~]] data=* expected-root=@]
 /// ```
+///
+/// `data` is the caller-supplied noun — flat atom for the default
+/// hash-gate, structured cell for catalog gates.
 fn build_graft_single_leaf_payload_in(
     slab: &mut NounSlab,
     note_id: u64,
     hull: u64,
     root: &Tip5Hash,
-    data: &[u8],
+    data: Noun,
 ) -> Noun {
     let root_bytes = tip5_to_atom_le_bytes(root);
     let note_root = make_atom_in(slab, &root_bytes);
@@ -149,9 +362,8 @@ fn build_graft_single_leaf_payload_in(
     let id = atom_from_u64(slab, note_id);
     let hull_atom = atom_from_u64(slab, hull);
     let note = T(slab, &[id, hull_atom, note_root, state]);
-    let data_atom = make_atom_in(slab, data);
     let exp_root = make_atom_in(slab, &root_bytes);
-    T(slab, &[note, data_atom, exp_root])
+    T(slab, &[note, data, exp_root])
 }
 
 #[cfg(test)]
@@ -219,6 +431,114 @@ mod tests {
         let hull = u64::MAX - 7;
         let _slab = build_settle_register_poke(hull, &fixture_root());
         let _slab2 = build_settle_note_poke(u64::MAX - 11, hull, &fixture_root(), b"x");
+    }
+
+    #[test]
+    fn build_settle_note_poke_with_data_emits_nonempty_jam() {
+        let root = fixture_root();
+        let slab = build_settle_note_poke_with_data(7, 1, &root, |slab| {
+            let a = make_atom_in(slab, b"a");
+            let b = make_atom_in(slab, b"b");
+            T(slab, &[a, b])
+        });
+        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn flat_byte_builder_matches_closure_builder() {
+        // build_settle_note_poke is now a closure-builder wrapper. The
+        // flat-byte path and the equivalent closure path must emit
+        // identical jam output.
+        let root = fixture_root();
+        let flat = build_settle_note_poke(11, 2, &root, b"x");
+        let via_closure = build_settle_note_poke_with_data(11, 2, &root, |slab| {
+            make_atom_in(slab, b"x")
+        });
+        let a = jam_to_bytes(&mut new_stack(), slab_root(&flat));
+        let b = jam_to_bytes(&mut new_stack(), slab_root(&via_closure));
+        assert_eq!(a, b);
+    }
+
+    fn fixture_proof() -> Vec<ProofNode> {
+        // Two-step path; values are arbitrary — we only assert structural
+        // jam output here, not merkle correctness.
+        vec![
+            ProofNode {
+                hash: [1, 2, 3, 4, 5],
+                side: true,
+            },
+            ProofNode {
+                hash: [6, 7, 8, 9, 10],
+                side: false,
+            },
+        ]
+    }
+
+    fn fixture_schnorr_keypair() -> ([nockchain_math::belt::Belt; 8], SchnorrPubkey) {
+        use nockchain_math::belt::Belt;
+        let mut sk = [Belt(0); 8];
+        sk[0] = Belt(0xabad_f00d);
+        let pk = crate::signing::derive_pubkey(&sk);
+        (sk, pk)
+    }
+
+    #[test]
+    fn build_settle_note_schnorr_poke_emits_nonempty_jam() {
+        let root = fixture_root();
+        let (sk, pubkey) = fixture_schnorr_keypair();
+        let data: &[u8] = b"\x01\x02\x03"; // belt-sized
+        let digest = crate::signing::schnorr_message_digest_for_data(data);
+        let sig = crate::signing::sign(&sk, &digest).expect("sign");
+        let slab = build_settle_note_schnorr_poke(101, 1, &root, data, &sig, &pubkey);
+        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn build_settle_note_ed25519_poke_emits_nonempty_jam() {
+        let root = fixture_root();
+        let slab = build_settle_note_ed25519_poke(
+            42,
+            1,
+            &root,
+            b"attestation",
+            &[0u8; 64],
+            &[0u8; 32],
+        );
+        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn build_settle_note_membership_poke_emits_nonempty_jam() {
+        let root = fixture_root();
+        let slab =
+            build_settle_note_membership_poke(7, 1, &root, b"alice", &fixture_proof());
+        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn build_settle_note_bounded_poke_emits_nonempty_jam() {
+        let root = fixture_root();
+        let slab =
+            build_settle_note_bounded_poke(9, 1, &root, 42, (10, 100), &fixture_proof());
+        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn build_settle_note_manifest_poke_emits_nonempty_jam() {
+        let root = fixture_root();
+        let fields: &[(&[u8], &[u8])] = &[
+            (b"name", b"alice"),
+            (b"age", b"\x2a"),
+        ];
+        let proofs = vec![fixture_proof(), fixture_proof()];
+        let slab = build_settle_note_manifest_poke(13, 1, &root, fields, &proofs);
+        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        assert!(!bytes.is_empty());
     }
 
     #[test]
