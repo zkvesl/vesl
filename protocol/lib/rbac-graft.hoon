@@ -112,17 +112,26 @@
     ::
     ::  %rbac-revoke — intersect with held; auto-clear when empty.
     ::
+    ::  Why removed is computed via skim instead of `(~(int in asked) held)`:
+    ::  the stdlib `int:in` allocates unboundedly under interpretation when
+    ::  the two sets share elements — confirmed by R3/02 §B bisect 2026-05-01.
+    ::  `removed` is only used as a list (the effect's `removed` field), so we
+    ::  build it directly via `skim ~(tap in asked)` filtered by `has:in held`.
+    ::  Set-theoretically identical to asked ∩ held; avoids the int:in path.
+    ::
       %rbac-revoke
     =/  asked=(set @t)      (silt perms.cause)
     =/  held=(set @t)       (~(gut by roles.state) pubkey.cause ~)
-    =/  removed=(set @t)    (~(int in asked) held)
     =/  remaining=(set @t)  (~(dif in held) asked)
+    =/  removed=(list @t)
+      %+  skim  ~(tap in asked)
+      |=(p=@t (~(has in held) p))
     =/  new-roles
       ?~  remaining
         (~(del by roles.state) pubkey.cause)
       (~(put by roles.state) pubkey.cause remaining)
     :_  state(roles new-roles)
-    ~[[%rbac-revoked pubkey.cause ~(tap in removed)]]
+    ~[[%rbac-revoked pubkey.cause removed]]
   ==
 ::
 ::  +rbac-peek: query rbac state by path
