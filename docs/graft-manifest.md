@@ -266,7 +266,7 @@ Version bumps to this schema append fields, never reshape existing ones.
 | `--grafts` names an absent graft | hard error |
 | Two manifests claim the same `name` | hard error at discovery; both source paths named in the message |
 | Marker missing from target file | warning; that marker is skipped, others continue |
-| All five markers missing | hard error (nothing to wire) |
+| All seven markers missing | hard error (nothing to wire) |
 | Banner `::  graft-inject:<name>:<marker>:begin` already present | skip that graft-marker pair; log `skipped` |
 | Body contains tabs (mixed indentation) | injection proceeds — `hoonc` may fail downstream |
 
