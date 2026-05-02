@@ -118,5 +118,5 @@ pub use nock_noun_rs::rejam_atom;
 // zkvesl-docs `reference/sdk.md` "Peek calls from Rust" for usage.
 pub use peek::{
     build_hull_peek_path, build_keyed_peek_path, build_keyless_peek_path,
-    peek_loobean, unwrap_triple_unit_atom,
+    decode_queue_popped, peek_loobean, peek_unit_list, unwrap_triple_unit_atom,
 };
