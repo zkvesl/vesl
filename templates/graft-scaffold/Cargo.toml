@@ -12,6 +12,7 @@ path = "src/main.rs"
 nockapp = { path = "../../nockchain/crates/nockapp", default-features = false }
 nockvm = { path = "../../nockchain/crates/nockvm/rust/nockvm" }
 nockvm_macros = { path = "../../nockchain/crates/nockvm/rust/nockvm_macros" }
+zkvm-jetpack = { path = "../../nockchain/crates/zkvm-jetpack" }
 
 # Vesl SDK — adjust paths to your vesl clone
 vesl-core = { path = "../../crates/vesl-core" }

@@ -9,6 +9,7 @@ use nockapp::wire::{SystemWire, Wire};
 use nockapp::NockApp;
 use nockvm::noun::{D, T};
 use nockvm_macros::tas;
+use zkvm_jetpack::hot::produce_prover_hot_state;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -19,7 +20,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         fs::read("out.jam").map_err(|e| format!("Failed to read out.jam: {e}"))?;
 
     let mut app: NockApp =
-        boot::setup(&kernel, cli, &[], "my-nockapp", None).await?;
+        boot::setup(&kernel, cli, &produce_prover_hot_state(), "my-nockapp", None).await?;
 
     // --- step 1: domain poke ---
 
