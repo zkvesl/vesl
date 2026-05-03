@@ -22,6 +22,10 @@ priority  = 200
 stability = "placeholder"
 after     = []
 
+[graft.types]
+effect = "intent-effect"
+cause  = "intent-cause"
+
 [graft.blocks.imports]
 sentinel = "*intent-graft"
 body     = """

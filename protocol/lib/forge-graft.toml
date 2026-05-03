@@ -21,6 +21,10 @@ version  = "0.1.0"
 priority = 40
 after    = ["guard-graft"]
 
+[graft.types]
+effect = "forge-effect"
+cause  = "forge-cause"
+
 [graft.blocks.imports]
 sentinel = "*forge-graft"
 body     = """

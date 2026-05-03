@@ -37,6 +37,10 @@ version  = "0.1.0"
 priority = 100
 after    = []
 
+[graft.types]
+effect = "validate-effect"
+cause  = "validate-cause"
+
 [graft.blocks.imports]
 sentinel = "*validate-graft"
 body     = """

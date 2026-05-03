@@ -11,6 +11,10 @@ version  = "0.1.0"
 priority = 10
 after    = []
 
+[graft.types]
+effect = "settle-effect"
+cause  = "settle-cause"
+
 [graft.blocks.imports]
 sentinel = "*settle-graft"
 body     = """

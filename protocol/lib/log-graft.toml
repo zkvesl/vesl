@@ -32,6 +32,10 @@ version  = "0.1.0"
 priority = 130
 after    = []
 
+[graft.types]
+effect = "log-effect"
+cause  = "log-cause"
+
 [graft.blocks.imports]
 sentinel = "*log-graft"
 body     = """

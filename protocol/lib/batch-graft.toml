@@ -36,6 +36,10 @@ version  = "0.1.0"
 priority = 145
 after    = []
 
+[graft.types]
+effect = "batch-effect"
+cause  = "batch-cause"
+
 [graft.blocks.imports]
 sentinel = "*batch-graft"
 body     = """

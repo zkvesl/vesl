@@ -26,6 +26,10 @@ version  = "0.1.0"
 priority = 90
 after    = ["rbac-graft"]
 
+[graft.types]
+effect = "registry-effect"
+cause  = "registry-cause"
+
 [graft.blocks.imports]
 sentinel = "*registry-graft"
 body     = """

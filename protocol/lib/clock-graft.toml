@@ -26,6 +26,10 @@ version  = "0.1.0"
 priority = 140
 after    = []
 
+[graft.types]
+effect = "clock-effect"
+cause  = "clock-cause"
+
 [graft.blocks.imports]
 sentinel = "*clock-graft"
 body     = """

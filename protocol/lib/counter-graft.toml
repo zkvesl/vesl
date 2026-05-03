@@ -27,6 +27,10 @@ version  = "0.1.0"
 priority = 60
 after    = ["kv-graft"]
 
+[graft.types]
+effect = "counter-effect"
+cause  = "counter-cause"
+
 [graft.blocks.imports]
 sentinel = "*counter-graft"
 body     = """

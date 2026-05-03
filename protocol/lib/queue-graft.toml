@@ -25,6 +25,10 @@ version  = "0.1.0"
 priority = 70
 after    = ["counter-graft"]
 
+[graft.types]
+effect = "queue-effect"
+cause  = "queue-cause"
+
 [graft.blocks.imports]
 sentinel = "*queue-graft"
 body     = """

@@ -29,6 +29,10 @@ version  = "0.1.0"
 priority = 80
 after    = ["queue-graft"]
 
+[graft.types]
+effect = "rbac-effect"
+cause  = "rbac-cause"
+
 [graft.blocks.imports]
 sentinel = "*rbac-graft"
 body     = """

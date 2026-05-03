@@ -20,6 +20,10 @@ version  = "0.1.0"
 priority = 30
 after    = ["mint-graft"]
 
+[graft.types]
+effect = "guard-effect"
+cause  = "guard-cause"
+
 [graft.blocks.imports]
 sentinel = "*guard-graft"
 body     = """

@@ -24,6 +24,10 @@ version  = "0.1.0"
 priority = 50
 after    = ["forge-graft"]
 
+[graft.types]
+effect = "kv-effect"
+cause  = "kv-cause"
+
 [graft.blocks.imports]
 sentinel = "*kv-graft"
 body     = """
