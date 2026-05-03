@@ -153,6 +153,87 @@ Conventional sentinels:
     Returns `~` for non-matching paths. The composer wraps each peek
     body into a chain — see Composition below.
 
+## `[graft.types]` — typed effect-union codegen
+
+A graft that exports a tagged effect type can opt in to the typed
+effect-union codegen by declaring it in a `[graft.types]` table:
+
+```toml
+[graft.types]
+effect = "settle-effect"
+cause  = "settle-cause"
+```
+
+Both fields are optional. `effect` names the bare Hoon type the graft
+exports for its effect variant — graft-inject splats it into the
+kernel's `+$ effect $%(...)` union under the `nockup:effect-union`
+marker. `cause` is parsed forward-compat for Phase 03f Lever 3 (cause
+destructuring); current codegen reads only `effect`.
+
+Names must be kebab-case (`^[a-z][a-z0-9-]*$`) — they're spliced
+literally into Hoon source, so a malformed name surfaces as a hoonc
+`find . X` failure with no manifest attribution.
+
+Two grafts cannot declare the same `effect` (or `cause`) name —
+graft-inject hard-errors at discovery with both manifest paths. Hoon's
+`$%` would otherwise reject the synthesized union as `not a fork` with
+no manifest attribution.
+
+### Codegen markers
+
+Two `nockup:` markers anchor the codegen pass:
+
+| Marker | Purpose |
+|---|---|
+| `nockup:domain-effect` | Anchor for the developer's `+$ domain-effect $%(...)` declaration. graft-inject does not own the body here — only the marker presence. When present, codegen splices `domain-effect` into the union after the graft effects. |
+| `nockup:effect-union` | REPLACE-IF-PRESENT codegen target. graft-inject owns the banner-bounded block beneath this marker; rerunning with a different graft set rewrites the block to match. |
+
+The synthesized block looks like:
+
+```hoon
+::  nockup:effect-union
+::  graft-inject:effect-union:begin
++$  effect
+  $%  settle-effect
+      counter-effect
+      domain-effect
+  ==
+::  graft-inject:effect-union:end
+```
+
+Variant order matches the composer's input order (priority-sorted by
+default). An empty union falls back to `[%effect-placeholder ~]` so
+Hoon's `$%` stays non-empty.
+
+### Auto-migration
+
+Kernels that pre-date Phase 03f (carrying a bare `+$  effect  *` line
+and no codegen markers) auto-migrate on the next `graft-inject` run.
+The bare line is replaced with a placeholder `+$ domain-effect` block
+and the two codegen markers; the codegen pass then takes over the
+typed-union slot in the same `--apply` invocation. Pass `--no-migrate`
+to opt out — the kernel keeps its bare `+$ effect *` and codegen is
+skipped (the cast/weld friction at multi-graft `weld` sites remains).
+
+A custom `+$ effect (list @t)` (or any non-bare shape) is left alone
+even with auto-migration on. Surface a stderr note; don't rewrite
+bespoke domain types.
+
+### `--list --json` output
+
+Each graft summary gains a `types` field when the manifest declares one:
+
+```json
+{
+  "name": "settle-graft",
+  ...
+  "types": { "effect": "settle-effect", "cause": "settle-cause" }
+}
+```
+
+Grafts without `[graft.types]` omit the field (additive per the
+schema's "append never reshape" contract).
+
 ## Composition
 
 When multiple grafts contribute blocks for the same marker, `graft-inject`
