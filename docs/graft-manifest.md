@@ -100,9 +100,13 @@ Grafts fall into five families. The priority number both orders injection and la
 
 ## `[graft.blocks.*]` — injection blocks
 
-A graft contributes one block per marker it claims. Five markers exist
-in Stage 1: `imports`, `state`, `cause`, `poke`, `peek`. A block omitted
-from the manifest is not injected for that marker — the marker is left
+A graft contributes one block per marker it claims. Nine markers exist:
+seven content markers — `imports`, `state`, `cause`, `poke-prelude`,
+`poke`, `poke-postlude`, `peek` — plus two codegen markers
+(`domain-effect`, `effect-union`) introduced in Phase 03f Lever 1.
+Codegen markers are anchors for the typed effect-union pass: grafts do
+not contribute per-graft blocks at them. A content block omitted from
+the manifest is not injected for that marker — the marker is left
 untouched (or, for `peek`, joins the chain only if other grafts contribute).
 
 Each present block is a TOML sub-table with two fields:
@@ -266,7 +270,7 @@ Version bumps to this schema append fields, never reshape existing ones.
 | `--grafts` names an absent graft | hard error |
 | Two manifests claim the same `name` | hard error at discovery; both source paths named in the message |
 | Marker missing from target file | warning; that marker is skipped, others continue |
-| All seven markers missing | hard error (nothing to wire) |
+| All nine markers missing | hard error (nothing to wire) |
 | Banner `::  graft-inject:<name>:<marker>:begin` already present | skip that graft-marker pair; log `skipped` |
 | Body contains tabs (mixed indentation) | injection proceeds — `hoonc` may fail downstream |
 
