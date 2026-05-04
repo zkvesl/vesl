@@ -140,4 +140,37 @@
 ?>  =(`@`2 (~(got by store.kv.st) 'b'))
 ?>  =(2 next-seq.log.st)
 ::
+::  ============================================
+::  audit-write to kv with same-body log (R3 B's %issue-license shape)
+::  ============================================
+::
+=^  efx-aw1  st
+  (audit-write st [%kv-set 'license:001' `@`100] %issued (jam 'license:001=100'))
+?>  ?=([%kv-stored *] i.efx-aw1)
+?>  =('license:001' key.i.efx-aw1)
+?>  ?=(^ t.efx-aw1)
+?>  ?=([%log-appended *] i.t.efx-aw1)
+?>  =(`@`100 (~(got by store.kv.st) 'license:001'))
+::
+::  ============================================
+::  audit-write to registry with DIFFERENT body for the log
+::  (R3 B's %revoke-license: writes a key delete, logs the human name)
+::  ============================================
+::
+=^  efx-aw2  st
+  (audit-write st [%registry-del `@`0xbeef] %revoked (jam 'org-name'))
+?>  ?=([%registry-deleted *] i.efx-aw2)
+?>  ?=(^ t.efx-aw2)
+?>  ?=([%log-appended *] i.t.efx-aw2)
+::
+::  ============================================
+::  audit-write to queue (the third storage path)
+::  ============================================
+::
+=^  efx-aw3  st
+  (audit-write st [%queue-push (jam 'job2')] %queued (jam 'job2'))
+?>  ?=([%queue-pushed *] i.efx-aw3)
+?>  ?=(^ t.efx-aw3)
+?>  ?=([%log-appended *] i.t.efx-aw3)
+::
 %test-domain-patterns-passed

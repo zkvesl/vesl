@@ -118,25 +118,43 @@
   =/  pair  (batch-poke batch.state c)
   [-.pair state(batch +.pair)]
 ::
-::  +audit-write: write to a kv-graft target then append a log entry.
+::  +audit-write: write to a storage graft, then append a log entry.
 ::
-::  Stub: commit-1 ships kv-only dispatch. Commit 4 broadens to
-::  registry/queue + factors out the dispatch shape.
+::  Bundles the "delegate-to-storage + log-append" pattern that R3 B,
+::  R7 H, and R9 J hand-coded into ~3-4 lines per arm. Static dispatch
+::  on -.target picks the storage graft (kv / registry / queue);
+::  unknown heads crash at hoonc-time with a clear trace.
 ::
-::  Returns [combined-effects new-state]. Effects are kv-effects then
-::  log-effect, in that order. Caller welds in their own domain-effect
-::  after if applicable.
+::  log-tag and log-body are separate so callers can write one shape
+::  and log a different one (R3 B's %revoke-license writes a key
+::  delete but logs the human-readable name). Pass log-body=jam-of-write
+::  if the same.
+::
+::  Returns [welded-effects new-state] suitable for =^ binding. Effect
+::  order: storage first, then log. Caller welds in their own
+::  domain-effect after if applicable.
 ::
 ++  audit-write
   |*  $:  state=*
-          target=kv-cause
+          target=*
           log-tag=@ta
           log-body=@
       ==
-  =/  kv-pair  (kv-poke kv.state target)
+  =/  storage-result
+    ?+  -.target  ~|([%audit-write-unsupported-target -.target] !!)
+        %kv-set           (apply-kv ;;(kv-cause target) state)
+        %kv-delete        (apply-kv ;;(kv-cause target) state)
+        %registry-put     (apply-registry ;;(registry-cause target) state)
+        %registry-update  (apply-registry ;;(registry-cause target) state)
+        %registry-del     (apply-registry ;;(registry-cause target) state)
+        %queue-push       (apply-queue ;;(queue-cause target) state)
+        %queue-pop        (apply-queue ;;(queue-cause target) state)
+        %queue-clear      (apply-queue ;;(queue-cause target) state)
+    ==
+  =/  storage-effects  -.storage-result
+  =/  st1  +.storage-result
   =/  log-pair
-    (log-poke log.state [%log-append log-tag log-body])
-  =/  st1  state(kv +.kv-pair)
+    (log-poke log.st1 [%log-append log-tag log-body])
   =/  st2  st1(log +.log-pair)
-  [(weld -.kv-pair -.log-pair) st2]
+  [(weld storage-effects -.log-pair) st2]
 --
