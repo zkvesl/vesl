@@ -62,6 +62,30 @@
   =/  pair  (kv-poke kv.state c)
   [-.pair state(kv +.pair)]
 ::
+::  +apply-queue: thread queue-graft poke through versioned-state.
+::  Convention: queue-graft state lives at queue.state.
+::
+++  apply-queue
+  |*  [c=queue-cause state=*]
+  =/  pair  (queue-poke queue.state c)
+  [-.pair state(queue +.pair)]
+::
+::  +apply-rbac: thread rbac-graft poke through versioned-state.
+::  Convention: rbac-graft state lives at rbac.state.
+::
+++  apply-rbac
+  |*  [c=rbac-cause state=*]
+  =/  pair  (rbac-poke rbac.state c)
+  [-.pair state(rbac +.pair)]
+::
+::  +apply-registry: thread registry-graft poke through versioned-state.
+::  Convention: registry-graft state lives at registry.state.
+::
+++  apply-registry
+  |*  [c=registry-cause state=*]
+  =/  pair  (registry-poke registry.state c)
+  [-.pair state(registry +.pair)]
+::
 ::  +apply-log: thread log-graft poke through versioned-state.
 ::  Convention: log-graft state lives at log.state.
 ::
@@ -69,6 +93,30 @@
   |*  [c=log-cause state=*]
   =/  pair  (log-poke log.state c)
   [-.pair state(log +.pair)]
+::
+::  +apply-clock: thread clock-graft poke through versioned-state.
+::  Convention: clock-graft state lives at clock.state.
+::
+++  apply-clock
+  |*  [c=clock-cause state=*]
+  =/  pair  (clock-poke clock.state c)
+  [-.pair state(clock +.pair)]
+::
+::  +apply-validate: thread validate-graft poke through versioned-state.
+::  Convention: validate-graft state lives at validate.state.
+::
+++  apply-validate
+  |*  [c=validate-cause state=*]
+  =/  pair  (validate-poke validate.state c)
+  [-.pair state(validate +.pair)]
+::
+::  +apply-batch: thread batch-graft poke through versioned-state.
+::  Convention: batch-graft state lives at batch.state.
+::
+++  apply-batch
+  |*  [c=batch-cause state=*]
+  =/  pair  (batch-poke batch.state c)
+  [-.pair state(batch +.pair)]
 ::
 ::  +audit-write: write to a kv-graft target then append a log entry.
 ::
