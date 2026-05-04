@@ -45,6 +45,17 @@
 /+  *batch-graft
 ::
 |%
+::  +$storage-cause: causes accepted by audit-write's target slot.
+::  Tagged union of the three storage-graft cause types — well-formed
+::  because %kv-* / %registry-* / %queue-* head atoms are non-overlapping
+::  by construction.
+::
++$  storage-cause
+  $%  kv-cause
+      registry-cause
+      queue-cause
+  ==
+::
 ::  +apply-counter: thread counter-graft poke through versioned-state.
 ::  Returns [counter-effects new-state] suitable for =^ binding.
 ::  Convention: counter-graft state lives at counter.state.
