@@ -429,6 +429,47 @@ gate = "sig-verify-ed25519"
 # namespace identifier.
 ```
 
+## Library helpers — `domain-patterns`
+
+`vesl-core/protocol/lib/domain-patterns.hoon` is a library, not a
+graft (no manifest, no graft-inject involvement). Import it with
+`/+  *domain-patterns` in your `app.hoon` when you write a domain arm
+that coordinates more than one graft.
+
+v0.1 ships:
+
+- `++  apply-<graft>` — one wet-gate per shipped data/behavior graft
+  (counter, kv, queue, rbac, registry, log, clock, validate, batch).
+  Each threads versioned-state by the convention `<graft>.state`,
+  calls the underlying `<graft>-poke`, and returns
+  `[(list <graft>-effect) versioned-state]` suitable for `=^` binding.
+- `++  audit-write` — bundles "delegate to a storage graft (kv,
+  registry, queue) + append to log-graft + return combined effects."
+  Takes `log-tag` and `log-body` separately so write body and log
+  body can differ (R3 B's `%revoke-license` shape).
+
+Idiom:
+
+```hoon
+%set-and-log
+  =^  efx-k  state  (apply-kv [%kv-set 'k' v] state)
+  =^  efx-l  state  (apply-log [%log-append %set (jam v)] state)
+  [(weld efx-k efx-l) state]
+```
+
+Or, equivalently with `audit-write`:
+
+```hoon
+%set-and-log
+  (audit-write state [%kv-set 'k' v] %set (jam v))
+```
+
+Convention violations (e.g. your kernel stores counter-graft state
+at `cnt.state` instead of `counter.state`) surface as a
+`find . counter` hoonc error at the helper call site, not an internal
+trace. Out of scope for the helpers: kernel-composite grafts (settle,
+mint, guard, forge, intent) — see the library header for rationale.
+
 ## Migration: vesl-graft → settle-graft
 
 Phase 12A (landed) renamed the `vesl-graft` package to `settle-graft`
