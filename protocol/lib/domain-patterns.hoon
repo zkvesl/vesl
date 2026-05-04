@@ -4,19 +4,29 @@
 ::  with `/+  *domain-patterns` from your `app.hoon`. Helpers operate
 ::  inside the kernel; no Rust seam.
 ::
-::  STUB. Commit 1 ships only the arms exercised by the smoke fixture
-::  (apply-counter, apply-kv, apply-log, audit-write). Commits 2-4 fill
-::  in headers, the remaining apply-<graft> arms, and audit-write tests.
+::  v0.1 ships:
+::    ++  apply-<graft>   one per shipped data/behavior graft. Threads
+::                        state by the convention that <graft>-graft
+::                        state lives at the field named <graft> on
+::                        versioned-state.
+::    ++  audit-write     bundles delegate-to-storage + log-append.
 ::
 ::  Convention: each apply-<graft> arm assumes the graft's state lives
 ::  at the field named <graft> on the kernel's versioned-state. This
 ::  matches the usage example in every shipped graft's header — see
-::  e.g. counter-graft.hoon:18.
+::  e.g. counter-graft.hoon:18, log-graft.hoon:36.
 ::
 ::  Wet-gate (|*) polymorphism is required because versioned-state is
-::  defined by the kernel, not by this library. Type-checking deferred
-::  to the call site; convention violations surface as
-::  `find . <graft>` errors at the call site, not internal hoonc traces.
+::  defined by the kernel, not by this library. Type-checking is
+::  deferred to the call site. Convention violations surface as
+::  `find . <graft>` errors at the call site, not internal hoonc
+::  traces. Acceptable failure mode.
+::
+::  Out of scope: kernel-composite grafts (settle, mint, guard, forge,
+::  intent). settle-poke takes a 3rd verify-gate arg; forge-poke is
+::  stateless. The other three mechanically fit the 2-arg shape but are
+::  kernel composites, not modular state shards. See commit-1 audit
+::  notes in the git log for the full rationale.
 ::
 ::  Namespace: helpers emit %domain-patterns-* effect tags on internal
 ::  errors (none in v0.1). Avoid declaring effect tags with that prefix
@@ -26,7 +36,13 @@
 ::
 /+  *counter-graft
 /+  *kv-graft
+/+  *queue-graft
+/+  *rbac-graft
+/+  *registry-graft
 /+  *log-graft
+/+  *clock-graft
+/+  *validate-graft
+/+  *batch-graft
 ::
 |%
 ::  +apply-counter: thread counter-graft poke through versioned-state.
