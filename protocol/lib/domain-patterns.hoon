@@ -147,20 +147,20 @@
 ::
 ++  audit-write
   |*  $:  state=*
-          target=*
+          target=storage-cause
           log-tag=@ta
           log-body=@
       ==
   =/  storage-result
-    ?+  -.target  ~|([%audit-write-unsupported-target -.target] !!)
-        %kv-set           (apply-kv ;;(kv-cause target) state)
-        %kv-delete        (apply-kv ;;(kv-cause target) state)
-        %registry-put     (apply-registry ;;(registry-cause target) state)
-        %registry-update  (apply-registry ;;(registry-cause target) state)
-        %registry-del     (apply-registry ;;(registry-cause target) state)
-        %queue-push       (apply-queue ;;(queue-cause target) state)
-        %queue-pop        (apply-queue ;;(queue-cause target) state)
-        %queue-clear      (apply-queue ;;(queue-cause target) state)
+    ?-  -.target
+        %kv-set           (apply-kv target state)
+        %kv-delete        (apply-kv target state)
+        %registry-put     (apply-registry target state)
+        %registry-update  (apply-registry target state)
+        %registry-del     (apply-registry target state)
+        %queue-push       (apply-queue target state)
+        %queue-pop        (apply-queue target state)
+        %queue-clear      (apply-queue target state)
     ==
   =/  storage-effects  -.storage-result
   =/  st1  +.storage-result
