@@ -79,6 +79,16 @@
       ^-  (list effect)
       ~[[%my-actioned iid data.u.act]]
       ::
+      ::  Multi-graft coordination: `/+  *domain-patterns` ships
+      ::    apply-counter, apply-kv, apply-queue, apply-rbac,
+      ::    apply-registry, apply-log, apply-clock, apply-validate,
+      ::    apply-batch — each a wet-gate that threads versioned-state
+      ::    through the named graft's poke. Idiom:
+      ::      =^  efx-c  state  (apply-counter [%counter-increment 'k'] state)
+      ::      =^  efx-k  state  (apply-kv [%kv-set 'k' v] state)
+      ::      [(weld efx-c efx-k) state]
+      ::    audit-write bundles storage+log into one call.
+      ::
       ::  --- grafted verification (hash gate) ---
       ::  default gate: tip5-hash the data, compare to root.
       ::  replace with your own verify-gate for domain logic.
