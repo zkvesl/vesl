@@ -56,6 +56,18 @@
       queue-cause
   ==
 ::
+::  +$audit-write-args: face-tagged sample for audit-write-named.
+::  Use this when you want labeled call-site syntax — a misorder by
+::  face name fails at the cell-construction site, not in the helper
+::  body.
+::
++$  audit-write-args
+  $:  state=*
+      target=storage-cause
+      log-tag=@ta
+      log-body=@
+  ==
+::
 ::  +apply-counter: thread counter-graft poke through versioned-state.
 ::  Returns [counter-effects new-state] suitable for =^ binding.
 ::  Convention: counter-graft state lives at counter.state.
@@ -168,4 +180,19 @@
     (log-poke log.st1 [%log-append log-tag log-body])
   =/  st2  st1(log +.log-pair)
   [(weld storage-effects -.log-pair) st2]
+::
+::  +audit-write-named: labeled-call form of audit-write.
+::  Same logic, but takes a face-tagged cell so misorder by face name
+::  fires at the call-site :*  ==  cell construction. Idiom:
+::    =^  efx  state
+::      %-  audit-write-named
+::      :*  state=state
+::          target=[%kv-set key value]
+::          log-tag=%set
+::          log-body=(jam value)
+::      ==
+::
+++  audit-write-named
+  |*  args=audit-write-args
+  (audit-write state.args target.args log-tag.args log-body.args)
 --
