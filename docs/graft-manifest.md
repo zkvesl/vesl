@@ -62,7 +62,7 @@ matters inside the vesl repo.
 | `version` | string | yes | Semver. Bumped when blocks change in a backwards-incompatible way. |
 | `priority` | int | yes | Injection order. Lower = injected earlier. See **The 5-family lattice** below for the band assignments. |
 | `stability` | string | no | One of `stable`, `beta`, `placeholder`. Defaults to `stable` if omitted. `placeholder` marks a reserved family slot whose body crashes on invocation (see `intent-graft.hoon`) — consumers building on it are explicitly building against an unfinished primitive. `beta` is for grafts that compile and run but whose interface may change. |
-| `after` | string list | no | Soft ordering hints. Each entry names another graft that must inject earlier. Error at load time if an entry names a graft not present in the discovered set. Resolved after `priority` ties. |
+| `after` | string list | no | Soft ordering hints. Each entry names another graft that must inject earlier. If an entry names a graft not present in the discovered set, the hint is silently ignored; a one-line `note` prints to stderr and priority-based ordering applies. This lets selective composition (e.g., dropping `queue-graft` from the cp set while keeping `rbac-graft`) work without manifest edits. Resolved after `priority` ties. |
 
 Example:
 
@@ -347,7 +347,7 @@ Version bumps to this schema append fields, never reshape existing ones.
 | TOML parse failure | hard error; surface the line number from the parser |
 | `[graft]` missing required field (`name`/`version`/`priority`) | hard error |
 | `name` not matching `^[a-z][a-z0-9-]*$` | hard error at discovery |
-| `after` references an absent graft | hard error at discovery |
+| `after` references an absent graft | stderr `note`; hint silently dropped, priority-based ordering applies (selective composition stays valid) |
 | `--grafts` names an absent graft | hard error |
 | Two manifests claim the same `name` | hard error at discovery; both source paths named in the message |
 | Marker missing from target file | warning; that marker is skipped, others continue |

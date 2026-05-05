@@ -134,6 +134,36 @@ pub fn peek_loobean(result: &NounSlab) -> Option<bool> {
     }
 }
 
+/// Decode a peek result whose payload is `(unit (... (unit @)))` as a u64,
+/// walking through any depth of `[~ ...]` wrapping until it reaches the
+/// innermost atom. Returns `None` for malformed shapes (any cell with a
+/// non-`~` head, or a leaf that won't fit in `u64`); returns `Some(0)`
+/// both when the value really is 0 *and* when the path didn't bind
+/// (bare `~`, `[~ ~]`, deeper-`~` cases). Disambiguate with
+/// [`peek_unit_list`] or a path-specific decoder when the null/zero
+/// distinction matters for your domain.
+///
+/// Use for atomic peek paths regardless of catalog wrapping depth:
+///   `[%clock-now ~]`, `[%counter-value name ~]`,
+///   `[%batch-pending-len ~]`, `[%queue-len ~]`, `[%log-len ~]`,
+///   `[%rbac-perm-count pubkey ~]`. log, rbac, and validate add an
+///   extra `[~ ...]` layer beyond the standard 2-deep peek wrap; the
+///   walk handles either depth without caller awareness.
+pub fn peek_atom_u64(result: &NounSlab) -> Option<u64> {
+    let mut noun = unsafe { *result.root() };
+    loop {
+        if let Ok(atom) = noun.as_atom() {
+            return atom.as_u64().ok();
+        }
+        let cell = noun.as_cell().ok()?;
+        let head = cell.head().as_atom().ok()?;
+        if !head.as_ne_bytes().iter().all(|&b| b == 0) {
+            return None;
+        }
+        noun = cell.tail();
+    }
+}
+
 /// Decode a triple-unit peek result whose payload is `(unit (list T))`.
 ///
 /// Returns:
@@ -236,10 +266,10 @@ pub fn decode_queue_popped(effects: &[NounSlab]) -> Option<(u64, Vec<u8>)> {
         let job = cell.tail();
 
         // `~` (atom 0) → queue was empty at pop time.
-        if let Ok(atom) = job.as_atom() {
-            if atom.as_ne_bytes().iter().all(|&b| b == 0) {
-                return None;
-            }
+        if let Ok(atom) = job.as_atom()
+            && atom.as_ne_bytes().iter().all(|&b| b == 0)
+        {
+            return None;
         }
 
         // `[~ [id body]]` — strip the unit `~`, then split the pair.
@@ -353,6 +383,77 @@ mod tests {
             if v == 99 { None } else { Some(v) }
         });
         assert_eq!(result, None);
+    }
+
+    // ---- peek_atom_u64 ----
+
+    /// Helper: wrap a payload noun in N nested `[~ ...]` units.
+    /// `wrap_n_unit(2, ...)` builds `[~ [~ payload]]`;
+    /// `wrap_n_unit(3, ...)` builds `[~ [~ [~ payload]]]`.
+    fn wrap_n_unit(depth: usize, payload_builder: impl FnOnce(&mut NounSlab) -> Noun) -> NounSlab {
+        let mut slab: NounSlab = NounSlab::new();
+        let mut current = payload_builder(&mut slab);
+        for _ in 0..depth {
+            current = T(&mut slab, &[D(0), current]);
+        }
+        slab.set_root(current);
+        slab
+    }
+
+    #[test]
+    fn peek_atom_u64_decodes_two_deep_wrap() {
+        let slab = wrap_n_unit(2, |s| atom_from_u64(s, 42));
+        assert_eq!(peek_atom_u64(&slab), Some(42));
+    }
+
+    #[test]
+    fn peek_atom_u64_decodes_three_deep_wrap() {
+        // rbac/log/validate wrap one layer deeper than the standard peek.
+        let slab = wrap_n_unit(3, |s| atom_from_u64(s, 999));
+        assert_eq!(peek_atom_u64(&slab), Some(999));
+    }
+
+    #[test]
+    fn peek_atom_u64_collapses_bare_null_to_zero() {
+        // Root is bare `~` (atom 0). Walker returns Some(0) — null/zero collapse.
+        let mut slab: NounSlab = NounSlab::new();
+        slab.set_root(D(0));
+        assert_eq!(peek_atom_u64(&slab), Some(0));
+    }
+
+    #[test]
+    fn peek_atom_u64_collapses_inner_null_to_zero() {
+        // [~ ~] — outer matched, inner is bare `~`. Same null/zero collapse.
+        let mut slab: NounSlab = NounSlab::new();
+        let cell = T(&mut slab, &[D(0), D(0)]);
+        slab.set_root(cell);
+        assert_eq!(peek_atom_u64(&slab), Some(0));
+    }
+
+    #[test]
+    fn peek_atom_u64_returns_some_zero_for_real_zero() {
+        // [~ [~ 0]] — value really is 0. Must not error.
+        let slab = wrap_n_unit(2, |s| atom_from_u64(s, 0));
+        assert_eq!(peek_atom_u64(&slab), Some(0));
+    }
+
+    #[test]
+    fn peek_atom_u64_rejects_non_zero_head() {
+        // [1 42] — head isn't `~`, so this isn't a (unit ...) chain.
+        let mut slab: NounSlab = NounSlab::new();
+        let bad = T(&mut slab, &[D(1), D(42)]);
+        slab.set_root(bad);
+        assert_eq!(peek_atom_u64(&slab), None);
+    }
+
+    #[test]
+    fn peek_atom_u64_rejects_deeper_malformed() {
+        // [~ [1 42]] — outer cell OK, inner cell head is non-zero.
+        let mut slab: NounSlab = NounSlab::new();
+        let inner = T(&mut slab, &[D(1), D(42)]);
+        let outer = T(&mut slab, &[D(0), inner]);
+        slab.set_root(outer);
+        assert_eq!(peek_atom_u64(&slab), None);
     }
 
     // ---- decode_queue_popped ----
