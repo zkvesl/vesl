@@ -205,6 +205,22 @@ Variant order matches the composer's input order (priority-sorted by
 default). An empty union falls back to `[%effect-placeholder ~]` so
 Hoon's `$%` stays non-empty.
 
+### Drop semantics
+
+graft-inject is symmetric: dropping a graft from `--grafts` (or
+`--exclude`-ing it) on a re-run with `--apply` auto-prunes every
+banner-pair-bounded block that graft owned. The pruned markers surface
+in the per-graft summary as `<name>-graft  no-manifest    pruned N/M
+(orphan blocks from previous injection)`. The codegen union shrinks
+in the same pass — its variant collection reads only from the active
+graft set, so a graft that's no longer present contributes no variant.
+
+Lib files (`hoon/lib/<name>-graft.hoon`, `hoon/lib/<name>-graft.toml`)
+are not touched by the prune; remove them manually if you want them
+gone for good. Re-adding the graft to `--grafts` later round-trips
+byte-identically: the inject pass restores the banner pairs at the
+priority-sorted position they originally held.
+
 ### Auto-migration
 
 Kernels that pre-date Phase 03f (carrying a bare `+$  effect  *` line
