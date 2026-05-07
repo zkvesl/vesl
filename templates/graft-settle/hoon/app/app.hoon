@@ -69,7 +69,7 @@
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[3 'graft-settle: invalid cause']
+      ~>  %slog.[1 'graft-settle: invalid cause']
       [~ state]
     ?-  -.u.act
       ::  domain: submit a report

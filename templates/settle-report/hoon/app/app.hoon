@@ -72,7 +72,7 @@
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[3 'settle: invalid cause']
+      ~>  %slog.[1 'settle: invalid cause']
       [~ state]
     ?-  -.u.act
       ::  %commit — register a commitment

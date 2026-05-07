@@ -46,7 +46,7 @@
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[3 'graft-intent: invalid cause']
+      ~>  %slog.[1 'graft-intent: invalid cause']
       [~ state]
     ::  Every cause delegates to intent-poke, and every arm there bangs
     ::  with %intent-graft-placeholder. That crash is the point.

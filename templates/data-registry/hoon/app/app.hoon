@@ -69,7 +69,7 @@
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[3 'registry: invalid cause']
+      ~>  %slog.[1 'registry: invalid cause']
       [~ state]
     ?-  -.u.act
       ::  %register — hash the data and store under name

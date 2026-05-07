@@ -74,7 +74,7 @@
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[3 'graft-hash-gate: invalid cause']
+      ~>  %slog.[1 'graft-hash-gate: invalid cause']
       [~ state]
     ?-  -.u.act
       ::  domain: declare an intent

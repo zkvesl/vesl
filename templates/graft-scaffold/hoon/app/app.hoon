@@ -66,7 +66,7 @@
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[3 'graft-scaffold: invalid cause']
+      ~>  %slog.[1 'graft-scaffold: invalid cause']
       [~ state]
     ?-  -.u.act
       ::  CUSTOMIZE: your domain poke
