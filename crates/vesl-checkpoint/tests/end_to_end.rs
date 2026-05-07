@@ -1,0 +1,86 @@
+//! End-to-end snapshot/resume round-trip.
+//!
+//! Boots a minimal kernel from `templates/counter/out.jam`, snapshots
+//! it, drops the app, and resumes from the snapshot. Asserts that
+//! resume completes without error — i.e., the state.jam written by
+//! `snapshot()` is loadable through `Cli::state_jam`.
+//!
+//! State-equivalence assertions (peek the same value pre/post
+//! resume) live in vesl-nockup-side tests, where the
+//! `compose_and_compile` machinery and graft-aware peek helpers
+//! ship. This upstream test is structural: it proves the bytes
+//! survive a round-trip and the API contract holds.
+
+use std::path::PathBuf;
+
+use anyhow::Result;
+use tempfile::TempDir;
+
+use vesl_checkpoint::{resume, snapshot, Snapshot};
+
+fn fixture_kernel() -> PathBuf {
+    // CARGO_MANIFEST_DIR = vesl-core/crates/vesl-checkpoint
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../templates/counter/out.jam")
+        .canonicalize()
+        .expect(
+            "fixture kernel templates/counter/out.jam must exist; \
+             rebuild the templates if it's missing",
+        )
+}
+
+fn fixture_app_hoon() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../templates/counter/hoon/app/app.hoon")
+        .canonicalize()
+        .expect("fixture app.hoon must exist alongside out.jam")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_then_resume_round_trip() -> Result<()> {
+    let kernel_path = fixture_kernel();
+    let app_hoon = fixture_app_hoon();
+    let snapshot_dir: TempDir = tempfile::tempdir()?;
+
+    // Boot the fixture kernel.
+    let kernel_bytes = tokio::fs::read(&kernel_path).await?;
+    let cli = nockapp::kernel::boot::default_boot_cli(false);
+    let app = nockapp::kernel::boot::setup(&kernel_bytes, cli, &[], "vesl-checkpoint-test", None)
+        .await
+        .map_err(|e| anyhow::anyhow!("initial boot failed: {e}"))?;
+
+    // Snapshot.
+    let snap = snapshot(&app, snapshot_dir.path(), &app_hoon).await?;
+
+    // Snapshot artifacts on disk.
+    assert!(snap.state_jam().exists(), "state.jam must be written");
+    assert!(
+        snapshot_dir.path().join("meta.toml").exists(),
+        "meta.toml must be written"
+    );
+    assert!(
+        !snap.source_sha256.is_empty(),
+        "source_sha256 must be populated"
+    );
+
+    // Re-load the meta from disk via Snapshot::load — round-trip.
+    let reloaded = Snapshot::load(snapshot_dir.path()).await?;
+    assert_eq!(reloaded.source_sha256, snap.source_sha256);
+    assert_eq!(
+        reloaded.vesl_checkpoint_version,
+        snap.vesl_checkpoint_version
+    );
+
+    // Drop the live app before resuming so the resume doesn't race
+    // with the snapshotted app's auto-save.
+    drop(app);
+
+    // Resume — the import path in boot::setup should pick up
+    // snapshot.state_jam() through cli.state_jam.
+    let _resumed = resume(&kernel_path, &snap, "vesl-checkpoint-test-resumed").await?;
+    // No assertion on state contents — that's the vesl-nockup-side
+    // test's job. Resume returning Ok is the contract this upstream
+    // test asserts.
+
+    Ok(())
+}

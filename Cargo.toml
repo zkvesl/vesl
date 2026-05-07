@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/vesl-core",
+    "crates/vesl-checkpoint",
     "crates/nock-noun-rs",
     "crates/nockchain-tip5-rs",
     "crates/nockchain-client-rs",
