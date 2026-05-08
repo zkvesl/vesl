@@ -121,18 +121,31 @@ pub fn jam_spends_manual(spends: &Spends) -> anyhow::Result<bytes::Bytes> {
 
 use nock_noun_rs::slab_root;
 
-/// Extract a Hash from a kernel effect of shape `[%tag hash-noun]`.
+/// Extract a Hash from a kernel effect of shape `[%expected_tag hash-noun]`.
+///
+/// Verifies the first effect's head tag matches `expected_tag` via
+/// [`crate::peek::effect_head_tag`] before decoding the hash from the
+/// cell's tail. Returns an error if no effects were emitted, the first
+/// effect isn't a cell with an atom head, the head tag doesn't match,
+/// or the tail isn't a valid `Hash` noun.
 pub fn extract_hash_from_effect(effects: &[NounSlab], expected_tag: &str) -> anyhow::Result<Hash> {
     let effect_slab = effects
         .first()
         .ok_or_else(|| anyhow::anyhow!("no effects returned from %{expected_tag} poke"))?;
 
-    let root = slab_root(effect_slab);
-    let cell = root
-        .as_cell()
-        .map_err(|_| anyhow::anyhow!("{expected_tag} effect is not a cell"))?;
+    match crate::peek::effect_head_tag(effect_slab) {
+        Some(tag) if tag == expected_tag => {}
+        Some(tag) => {
+            anyhow::bail!("expected %{expected_tag} effect, got %{tag}");
+        }
+        None => {
+            anyhow::bail!("{expected_tag} effect is not a cell with an atom head");
+        }
+    }
 
-    // The hash is the tail (head is the tag atom)
+    // SAFETY-of-shape: effect_head_tag confirmed the slab is a cell.
+    let root = slab_root(effect_slab);
+    let cell = root.as_cell().expect("effect_head_tag verified cell shape");
     let hash_noun = cell.tail();
     Hash::from_noun(&hash_noun).map_err(|e| anyhow::anyhow!("{expected_tag} hash decode: {e}"))
 }
