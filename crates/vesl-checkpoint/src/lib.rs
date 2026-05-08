@@ -104,6 +104,18 @@ impl Snapshot {
 /// `source_app_hoon` is the file this kernel was compiled from; its
 /// sha256 is recorded so a future `resume` can detect a mismatched
 /// kernel build.
+///
+/// **Memory pressure (RM4 §6).** `snapshot()` allocates transient
+/// memory proportional to the kernel's current state size on top of
+/// nockvm's ~8.5 GB stack reservation. After a long poke sequence
+/// (50+ events against a populated kernel), peak transient memory
+/// can push a 16 GB-class machine past its OS-level OOM threshold
+/// and the process is killed (SIGKILL, exit 137) before `snapshot`
+/// returns. The workaround is to split long sequences across multiple
+/// processes — snapshot at intermediate checkpoints and re-enter via
+/// [`resume`] in a fresh process. The reuse of nockapp's existing
+/// import path makes the multi-process flow equivalent to a single-
+/// process snapshot for state correctness.
 pub async fn snapshot(
     app: &NockApp,
     dir: &Path,
