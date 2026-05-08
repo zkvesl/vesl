@@ -280,21 +280,14 @@ pub fn effect_head_tags(effects: &[NounSlab]) -> Vec<String> {
 /// produced by the v0.1 builders) return `None`.
 pub fn decode_queue_popped(effects: &[NounSlab]) -> Option<(u64, Vec<u8>)> {
     for slab in effects {
-        // SAFETY: copy the Noun out immediately; the slab outlives this scope.
-        let root = unsafe { *slab.root() };
-
-        let cell = match root.as_cell() {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        let tag_atom = match cell.head().as_atom() {
-            Ok(a) => a,
-            Err(_) => continue,
-        };
-        let tag_trimmed = trim_trailing_zeros(tag_atom.as_ne_bytes());
-        if tag_trimmed.as_slice() != b"queue-popped" {
+        if effect_head_tag(slab).as_deref() != Some("queue-popped") {
             continue;
         }
+
+        // Tag matched: effect_head_tag confirmed [%queue-popped *].
+        // SAFETY: the slab outlives this function call.
+        let root = unsafe { *slab.root() };
+        let cell = root.as_cell().ok()?;
 
         // Tail is the unit `(unit [id=@ud body=*])`.
         let job = cell.tail();
