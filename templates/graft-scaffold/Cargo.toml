@@ -20,4 +20,3 @@ nock-noun-rs = { path = "../../crates/nock-noun-rs" }
 nockchain-tip5-rs = { path = "../../crates/nockchain-tip5-rs" }
 
 tokio = { version = "1.32", features = ["rt-multi-thread", "macros"] }
-anyhow = "1.0"
