@@ -25,6 +25,11 @@
 //! per-transition migrators) is intentionally out of scope here. Wait
 //! for actual cumulative-domain pressure to surface what shape it
 //! should take.
+//!
+//! The reference consumer is the meta-mode dogfood driver documented in
+//! `vesl-core/.dev/DOGFOOD_META.md` "Per-transition procedure" Step 5
+//! ("State-shape compatibility check"); see that doc for the
+//! `snapshot-state` / `restore-state-and-exercise` driver wiring.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
