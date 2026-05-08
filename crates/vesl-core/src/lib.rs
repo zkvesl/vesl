@@ -98,7 +98,8 @@ pub use graft_pokes::queue::{
 };
 pub use graft_pokes::rbac::{build_rbac_grant_poke, build_rbac_revoke_poke};
 pub use graft_pokes::registry::{
-    build_registry_del_poke, build_registry_put_poke, build_registry_update_poke,
+    build_registry_del_poke, build_registry_put_poke, build_registry_put_poke_from_noun,
+    build_registry_update_poke, build_registry_update_poke_from_noun,
 };
 pub use graft_pokes::clock::build_clock_tick_poke;
 pub use graft_pokes::log::{build_log_append_poke, build_log_append_poke_from_noun};
