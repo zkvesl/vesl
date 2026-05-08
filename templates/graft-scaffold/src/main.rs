@@ -8,7 +8,6 @@ use nockapp::noun::slab::NounSlab;
 use nockapp::wire::{SystemWire, Wire};
 use nockapp::NockApp;
 use nockvm::noun::{D, T};
-use nockvm_macros::tas;
 use zkvm_jetpack::hot::produce_prover_hot_state;
 
 #[tokio::main]
@@ -32,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("=== step 1: domain pokes ===\n");
     for item in &items {
         let mut slab = NounSlab::new();
-        let tag = D(tas!(b"my-action"));
+        let tag = make_tag_in(&mut slab, "my-action");
         let val = make_tag_in(&mut slab, item);
         let poke = T(&mut slab, &[tag, val]);
         slab.set_root(poke);
