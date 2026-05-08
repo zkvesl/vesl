@@ -161,6 +161,22 @@ pub async fn snapshot(
 /// snapshotted state shape, `boot::setup` propagates the error.
 /// Schema migration is the consumer's responsibility (see crate-level
 /// docs — out of scope here).
+///
+/// **Schema-extension caveat (RM4 §1).** Same-composition resume
+/// (the new kernel has the same set of grafts as the snapshot)
+/// roundtrips cleanly — pre- and post-resume pokes both emit effects.
+/// **Schema-extension resume** (the new kernel adds grafts that
+/// weren't in the snapshot) is currently a silent-failure case: the
+/// marker template's `++load` arm is identity, so new graft state
+/// fields end up at undefined nockvm axes. Subsequent pokes against
+/// those grafts run inside the wrapper's mule guard, panic on the
+/// undefined access, and return empty effect lists — the operator
+/// sees `Ok(vec![])` instead of a clear error. The fix lives in
+/// graft-inject's codegen (a `nockup:load-defaults` marker
+/// populated with each graft's `++new-state` default); deferred
+/// until v0.2 surfaces the requirement. Until then, treat resume as
+/// same-composition only and re-run the full poke sequence after
+/// any composition change rather than relying on snapshot+resume.
 pub async fn resume(
     jam_path: &Path,
     snapshot: &Snapshot,
