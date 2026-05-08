@@ -42,10 +42,10 @@ use sha2::{Digest, Sha256};
 
 /// Bundle returned by [`snapshot`] and consumed by [`resume`].
 ///
-/// `dir` is the directory holding the snapshot artifacts (`state.jam`
-/// + `meta.toml`). Callers can persist `Snapshot` directly via
-/// `serde` if they want a typed handle, or just hold the
-/// `dir: PathBuf` and reconstruct via [`Snapshot::load`] later.
+/// `dir` is the directory holding the snapshot artifacts
+/// (`state.jam` plus `meta.toml`). Callers can persist `Snapshot`
+/// directly via `serde` if they want a typed handle, or just hold
+/// the `dir: PathBuf` and reconstruct via [`Snapshot::load`] later.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     /// Directory holding the snapshot files.
