@@ -25,6 +25,11 @@
 //! they walk an `&[NounSlab]` effect list rather than a single peek
 //! slab, but the noun-walking idioms are the same.
 //!
+//! [`effect_head_tag`] / [`effect_head_tags`] are the generic
+//! head-atom rendering helpers — drivers that only need the cause-tag
+//! of an effect should call these instead of re-implementing the
+//! `slab.root() → as_cell → head().as_atom → from_utf8` dance.
+//!
 //! See zkvesl-docs `reference/sdk.md` "Peek calls from Rust" for
 //! worked examples.
 
@@ -225,6 +230,35 @@ pub fn peek_unit_list<T>(
         cur = cell.tail();
     }
     Some(items)
+}
+
+/// Extract the head-atom tag of an effect cell as a string.
+///
+/// Drivers that just want to inspect *which* effect was emitted typically
+/// only need the cause-name. This helper unifies the
+/// `slab.root() → as_cell → head().as_atom → trim → from_utf8` dance
+/// that otherwise gets re-implemented in every effect-consuming driver.
+///
+/// Returns `None` for atom-shaped effects (no head) and for cell effects
+/// whose head is itself a cell. NUL-padding from the `tas!` cord
+/// representation is stripped before UTF-8 decode; non-UTF-8 head bytes
+/// are rendered via [`String::from_utf8_lossy`] (so the function never
+/// returns `None` purely because of byte-encoding noise — only when the
+/// effect's *shape* prevents a head-tag from being read at all).
+pub fn effect_head_tag(effect: &NounSlab) -> Option<String> {
+    // SAFETY: the slab outlives this function call.
+    let root = unsafe { *effect.root() };
+    let cell = root.as_cell().ok()?;
+    let tag_atom = cell.head().as_atom().ok()?;
+    let trimmed = trim_trailing_zeros(tag_atom.as_ne_bytes());
+    Some(String::from_utf8_lossy(&trimmed).into_owned())
+}
+
+/// Slice form of [`effect_head_tag`]. Filters out effects that don't
+/// expose a head-atom tag, so the returned `Vec` may be shorter than
+/// `effects`.
+pub fn effect_head_tags(effects: &[NounSlab]) -> Vec<String> {
+    effects.iter().filter_map(effect_head_tag).collect()
 }
 
 /// Decode a `%queue-popped` effect into `(id, body_bytes)`.
@@ -503,5 +537,91 @@ mod tests {
         let effect = T(&mut slab, &[tag, D(0)]);
         slab.set_root(effect);
         assert_eq!(decode_queue_popped(&[slab]), None);
+    }
+
+    // ---- effect_head_tag / effect_head_tags ----
+
+    #[test]
+    fn effect_head_tag_returns_tag_for_well_formed_cell() {
+        // [%settle-noted *] — the typical effect shape.
+        let mut slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut slab, "settle-noted");
+        let effect = T(&mut slab, &[tag, D(99)]);
+        slab.set_root(effect);
+        assert_eq!(effect_head_tag(&slab).as_deref(), Some("settle-noted"));
+    }
+
+    #[test]
+    fn effect_head_tag_returns_none_for_atom_only_effect() {
+        // Bare atom — no head/tail to inspect.
+        let mut slab: NounSlab = NounSlab::new();
+        slab.set_root(D(42));
+        assert_eq!(effect_head_tag(&slab), None);
+    }
+
+    #[test]
+    fn effect_head_tag_returns_none_for_cell_with_cell_head() {
+        // [[a b] *] — head is a cell, not an atom.
+        let mut slab: NounSlab = NounSlab::new();
+        let head = T(&mut slab, &[D(1), D(2)]);
+        let effect = T(&mut slab, &[head, D(0)]);
+        slab.set_root(effect);
+        assert_eq!(effect_head_tag(&slab), None);
+    }
+
+    #[test]
+    fn effect_head_tag_lossy_decodes_non_utf8_head() {
+        // Build [<bad-bytes> ~] where the head atom contains non-UTF-8 bytes.
+        // 0xff 0xfe is not a valid UTF-8 sequence; from_utf8_lossy renders
+        // it as two U+FFFD replacement characters.
+        let mut slab: NounSlab = NounSlab::new();
+        let head = nock_noun_rs::make_atom_in(&mut slab, &[0xff, 0xfe]);
+        let effect = T(&mut slab, &[head, D(0)]);
+        slab.set_root(effect);
+        let got = effect_head_tag(&slab).expect("non-UTF-8 still produces Some");
+        assert!(
+            got.contains('\u{fffd}'),
+            "expected lossy replacement, got {got:?}",
+        );
+    }
+
+    #[test]
+    fn effect_head_tags_collects_only_valid_heads() {
+        // Three slabs: one atom-only, one well-formed cell, one cell with
+        // cell head. effect_head_tags must keep only the middle one.
+        let mut atom_slab: NounSlab = NounSlab::new();
+        atom_slab.set_root(D(7));
+
+        let mut good_slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut good_slab, "registry-stored");
+        let good = T(&mut good_slab, &[tag, D(0)]);
+        good_slab.set_root(good);
+
+        let mut nested_slab: NounSlab = NounSlab::new();
+        let head = T(&mut nested_slab, &[D(1), D(2)]);
+        let nested = T(&mut nested_slab, &[head, D(0)]);
+        nested_slab.set_root(nested);
+
+        let tags = effect_head_tags(&[atom_slab, good_slab, nested_slab]);
+        assert_eq!(tags, vec!["registry-stored".to_string()]);
+    }
+
+    #[test]
+    fn effect_head_tags_preserves_order_for_multiple_cell_effects() {
+        let mut a: NounSlab = NounSlab::new();
+        let ta = make_tag_in(&mut a, "settle-registered");
+        let na = T(&mut a, &[ta, D(0)]);
+        a.set_root(na);
+
+        let mut b: NounSlab = NounSlab::new();
+        let tb = make_tag_in(&mut b, "settle-noted");
+        let nb = T(&mut b, &[tb, D(0)]);
+        b.set_root(nb);
+
+        let tags = effect_head_tags(&[a, b]);
+        assert_eq!(
+            tags,
+            vec!["settle-registered".to_string(), "settle-noted".to_string()],
+        );
     }
 }
