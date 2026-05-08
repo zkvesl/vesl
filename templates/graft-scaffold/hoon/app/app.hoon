@@ -1,38 +1,39 @@
-::  graft-scaffold — starter kernel with Vesl graft pre-wired
+::  nockup basic scaffold + vesl graft markers.
 ::
-::  Everything you need to build a grafted NockApp:
-::    - settle-graft + vesl-merkle already imported
-::    - settle-state composed into versioned-state
-::    - all three %settle-* poke delegations written
-::    - settle-peek fallthrough in ++peek
-::    - one placeholder domain poke (%my-action) to customize
+::  Copy this file over your nockup project's hoon/app/app.hoon,
+::  then run `graft-inject hoon/app/app.hoon` to wire in the graft.
+::  The `::  nockup:*` comments are injection anchors — don't delete them
+::  until after you run graft-inject.
 ::
-::  CUSTOMIZE: rename %my-action, add your state fields, fill in
-::  your domain poke body. The graft wiring is done.
-::
-::  compile: hoonc --new hoon/app/app.hoon hoon/
-::
-/+  *settle-graft
-/+  *vesl-merkle
+/+  lib
+::  nockup:imports
 /=  *  /common/wrapper
 ::
 =>
 |%
-::  kernel state — your fields + grafted settle state
-::
 +$  versioned-state
   $:  %v1
-      settle=settle-state
-      :: CUSTOMIZE: add your state fields here
-      items=(map @ @t)
-      item-count=@ud
+      ::  nockup:state
   ==
 ::
+::  domain-effect is your app's effect union. Add variants here as
+::  your app emits them. The codegen-generated `+$ effect` below
+::  splats domain-effect into a typed union with all graft effects.
+::
+::  nockup:domain-effect
++$  domain-effect
+  $%  [%domain-placeholder ~]
+  ==
+::
+::  graft-inject codegen replaces the open `+$ effect *` below with a
+::  typed union. Do not edit the codegen banner block by hand.
+::
+::  nockup:effect-union
 +$  effect  *
 ::
 +$  cause
-  $%  [%my-action data=@t]      :: CUSTOMIZE: rename this tag
-      settle-cause
+  $%  [%cause ~]
+      ::  nockup:cause
   ==
 --
 |%
@@ -44,91 +45,45 @@
   ++  load
     |=  old-state=versioned-state
     ^-  _state
+    ::  graft-inject codegen replaces the placeholder below with a
+    ::  `=/  defaults  ^*(versioned-state)` + `%_  defaults  ...  ==`
+    ::  overlay so resumed snapshots with a smaller noun shape get the
+    ::  current kernel's per-graft defaults instead of garbage at the
+    ::  new axes. See README "State checkpoints" for the schema-extension
+    ::  migration semantics.
+    ::
+    ::  nockup:load-defaults
     old-state
-  ::  +peek: query your state or settle state
   ::
   ++  peek
     |=  =path
     ^-  (unit (unit *))
-    ?+  path  (settle-peek settle.state path)
-      :: CUSTOMIZE: add your peek paths
-      [%item id=@ ~]
-        =/  iid  +<.path
-        ``(~(get by items.state) iid)
-      ::
-      [%count ~]
-        ``item-count.state
-    ==
-  ::  +poke: handle domain actions or delegate to graft
+    ::  nockup:peek
+    ~
   ::
   ++  poke
     |=  =ovum:moat
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[1 'graft-scaffold: invalid cause']
+      ::  Soft-cast can fail on atom-typed input as well as cells with
+      ::  unknown heads, so guard both before reading the tag.
+      =/  tag=@tas
+        ?@  cause.input.ovum  `@tas`cause.input.ovum
+        ?@  -.cause.input.ovum  `@tas`-.cause.input.ovum
+        %unknown
+      ~>  %slog.[1 (crip "invalid cause [{<tag>} ...] (full: {<cause.input.ovum>})")]
       [~ state]
-    ?-  -.u.act
-      ::  CUSTOMIZE: your domain poke
-      ::
-        %my-action
-      =/  iid  item-count.state
-      =/  new-items  (~(put by items.state) iid data.u.act)
-      ~>  %slog.[0 (cat 3 'item #' (scot %ud iid))]
-      :_  state(items new-items, item-count +(iid))
-      ^-  (list effect)
-      ~[[%my-actioned iid data.u.act]]
-      ::
-      ::  Multi-graft coordination: `/+  *domain-patterns` ships
-      ::    apply-counter, apply-kv, apply-queue, apply-rbac,
-      ::    apply-registry, apply-log, apply-clock, apply-validate,
-      ::    apply-batch — each a wet-gate that threads versioned-state
-      ::    through the named graft's poke. Idiom:
-      ::      =^  efx-c  state  (apply-counter [%counter-increment 'k'] state)
-      ::      =^  efx-k  state  (apply-kv [%kv-set 'k' v] state)
-      ::      [(weld efx-c efx-k) state]
-      ::    audit-write bundles storage+log into one call.
-      ::
-      ::  --- grafted verification (hash gate) ---
-      ::  default gate: tip5-hash the data, compare to root.
-      ::  replace with your own verify-gate for domain logic.
-      ::
-        %settle-register
-      =/  lc=settle-cause  [%settle-register hull.u.act root.u.act]
-      =/  hash-gate=verify-gate
-        |=  [note-id=@ data=* expected-root=@]
-        ^-  ?
-        =((hash-leaf ;;(@ data)) expected-root)
-      =/  [efx=(list settle-effect) new-settle=settle-state]
-        (settle-poke settle.state lc hash-gate)
-      :_  state(settle new-settle)
-      ^-  (list effect)
-      efx
-      ::
-        %settle-verify
-      =/  lc=settle-cause  [%settle-verify payload.u.act]
-      =/  hash-gate=verify-gate
-        |=  [note-id=@ data=* expected-root=@]
-        ^-  ?
-        =((hash-leaf ;;(@ data)) expected-root)
-      =/  [efx=(list settle-effect) new-settle=settle-state]
-        (settle-poke settle.state lc hash-gate)
-      :_  state(settle new-settle)
-      ^-  (list effect)
-      efx
-      ::
-        %settle-note
-      =/  lc=settle-cause  [%settle-note payload.u.act]
-      =/  hash-gate=verify-gate
-        |=  [note-id=@ data=* expected-root=@]
-        ^-  ?
-        =((hash-leaf ;;(@ data)) expected-root)
-      =/  [efx=(list settle-effect) new-settle=settle-state]
-        (settle-poke settle.state lc hash-gate)
-      :_  state(settle new-settle)
-      ^-  (list effect)
-      efx
-    ==
+    ::  nockup:poke-prelude
+    =/  out=[efx=(list effect) new=_state]
+      ?-    -.u.act
+          %cause
+        ~>  %slog.[1 'poked']
+        [~ state]
+        ::  nockup:poke
+      ==
+    ::  nockup:poke-postlude
+    out
   --
 --
 ((moat |) inner)
