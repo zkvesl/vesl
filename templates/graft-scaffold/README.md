@@ -56,6 +56,18 @@ Adjust the paths in `Cargo.toml` to point to your local clones of nockchain and 
 
 Requires nightly Rust (`cargo +nightly build`).
 
+## Standalone sandbox setup
+
+The scaffold's `Cargo.toml` includes a `[patch.crates-io]` block for `ibig` that points at the nockchain-vendored version. The default path (`../../nockchain/crates/nockvm/rust/ibig`) assumes:
+
+```
+<parent>/
+├── nockchain/        # nockchain clone
+└── <your-scaffold>/  # this scaffold
+```
+
+If your sandbox is nested deeper (e.g. `<parent>/<dir>/<scaffold>/`), adjust both the `[dependencies]` `path = "../../nockchain/..."` lines AND the `[patch.crates-io]` line by adding one more `../`. The patch must resolve to the SAME ibig path as your `nockapp` / `nockvm` lines, or you'll see "multiple different versions of crate `ibig`" errors at type-check time.
+
 ## Using nockup?
 
 See [vesl-nockup](https://github.com/zkVesl/vesl-nockup) for a nockup-packaged version: pre-resolved git deps (no sibling repos required), a `graft-inject` CLI that auto-wires your kernel, and a `vesl-test` harness with a standard lifecycle suite.
