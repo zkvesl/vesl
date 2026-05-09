@@ -141,11 +141,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let note_id = atom_from_u64(&mut slab, 1);
         let note_hull = atom_from_u64(&mut slab, settle_hull);
-        let note = T(&mut slab, &[
-            note_id, note_hull,
-            make_atom_in(&mut slab, &rb),
-            T(&mut slab, &[make_tag_in(&mut slab, "pending"), D(0)]),
-        ]);
+        let note_root = make_atom_in(&mut slab, &rb);
+        let pending_tag = make_tag_in(&mut slab, "pending");
+        let inner_state = T(&mut slab, &[pending_tag, D(0)]);
+        let note = T(&mut slab, &[note_id, note_hull, note_root, inner_state]);
         let data = make_atom_in(&mut slab, items[0].as_bytes());
         let exp_root = make_atom_in(&mut slab, &rb);
         let payload_noun = T(&mut slab, &[note, data, exp_root]);
