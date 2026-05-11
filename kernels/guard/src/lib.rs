@@ -1,6 +1,8 @@
 //! Vesl Guard kernel JAM embedding crate.
 //!
-//! See kernels/vesl/src/lib.rs for full docs.
+//! Embeds the compiled Hoon kernel at build time; runtime sha256-
+//! verifies the embedded bytes match what build.rs hashed. Kernel
+//! source: protocol/lib/guard-kernel.hoon.
 //! AUDIT 2026-04-17 M-07: runtime sha256 check.
 
 use sha2::{Digest, Sha256};
