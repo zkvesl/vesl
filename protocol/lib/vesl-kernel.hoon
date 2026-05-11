@@ -181,20 +181,11 @@
       ::  Verify manifest (must pass before we attempt proving)
       ::
       =/  result-note  (settle-note note.args mani.args expected-root.args)
-      ::  Phase 3: field-safe STARK execution on manifest data
-      ::
-      ::  Decompose all text fields to 7-byte belt lists, then
-      ::  fold to a single atom < Goldilocks prime (sum mod p).
-      ::  Cell subjects crash the STARK memory table — the table
-      ::  decomposes the full subject tree and can't represent
-      ::  cell nodes as field elements.
-      ::
-      ::  Root/hull bound via Fiat-Shamir header/nonce (Phase 1).
-      ::  Belt digest bound via STARK execution trace.
-      ::
-      ::  Formula: 64 nested increments (Nock 0/4 only).
-      ::  Subject: belt-digest (single atom < p).
-      ::  Product: belt-digest + 64.
+      ::  STARK input prep: split manifest text fields to 7-byte belts and
+      ::  Horner-fold to one field element (cell subjects crash the STARK
+      ::  memory table — it can't represent cell nodes as field elements).
+      ::  Root + hull are bound by vesl-prover via Fiat-Shamir; this fold
+      ::  only binds manifest content. See vesl-prover.hoon.
       ::
       =/  qb=(list @)  (split-to-belts query.mani.args)
       =/  ob=(list @)  (split-to-belts output.mani.args)
@@ -207,8 +198,7 @@
         $(acc (weld (flop (split-to-belts dat.chunk.i.res)) acc), res t.res)
       =/  all-belts=(list @)
         (weld qb (weld ob (weld pb chunk-belts)))
-      ::  fold all belts to single atom < p
-      ::  p = 2^64 - 2^32 + 1 (Goldilocks prime)
+      ::  Goldilocks prime: 2^64 - 2^32 + 1
       ::
       =/  p=@  (add (sub (bex 64) (bex 32)) 1)
       ::  AUDIT 2026-04-19 C-lead-3: Horner polynomial fold. Plain sum
@@ -222,8 +212,7 @@
         %+  roll  all-belts
         |=  [a=@ b=@]
         (mod (add (mul b base) a) p)
-      ::  64 nested increments on [0 1]
-      ::  known-working pattern: atom subject + Nock 0/4 only
+      ::  Known-working pattern: atom subject + Nock 0/4 only.
       ::
       ::  TODO: AUDIT 2026-04-17 C-lead-1 — STARK formula hardcoding
       ::
