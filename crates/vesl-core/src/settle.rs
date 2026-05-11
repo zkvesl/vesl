@@ -373,27 +373,6 @@ pub fn build_prove_poke(
     slab
 }
 
-/// Build a [%register hull=@ root=@] poke in NounSlab.
-///
-/// Mirrors hull/src/noun_builder.rs build_register_poke.
-/// Public for cross-runtime alignment testing.
-pub fn build_register_poke(hull_id: u64, root: &Tip5Hash) -> NounSlab {
-    use nock_noun_rs::*;
-    use nockchain_tip5_rs::tip5_to_atom_le_bytes;
-
-    let mut slab = NounSlab::new();
-
-    let tag = make_tag_in(&mut slab, "register");
-    // Public API: callers may pass hash-derived hull IDs above DIRECT_MAX.
-    let hull = atom_from_u64(&mut slab, hull_id);
-    let root_bytes = tip5_to_atom_le_bytes(root);
-    let root_noun = make_atom_in(&mut slab, &root_bytes);
-
-    let poke = nockvm::noun::T(&mut slab, &[tag, hull, root_noun]);
-    slab.set_root(poke);
-    slab
-}
-
 /// Build settlement payload noun in a NounSlab.
 ///
 /// Encodes note + manifest + root as nested noun structure matching
