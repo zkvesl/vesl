@@ -296,10 +296,12 @@ Two loud things worth surfacing up front (not a security review, but the sort of
 - **Why flagged:** The AUDIT-numbered paragraphs (`C-lead-3`, `C-lead-1`) carry load-bearing context — they document invariants the code cannot self-express (Fiat-Shamir binding location, formula-hardcoding risk). Those stay. The narration ("Phase 3: …", "Formula: 64 nested increments", "Subject: belt-digest", "known-working pattern: atom subject + Nock 0/4 only") restates what `roll`, `bex 56`, and the literal `[4 [4 …]]` construction already say. The block is 62 contiguous comment lines on a ~70-line logic block.
 - **Recommendation:** Keep the AUDIT blocks verbatim. Compress the narration into a ~6-line header that points to `vesl-prover.hoon` for the Fiat-Shamir half. CLAUDE.md §"Don't explain WHAT" applies here — but §"Explain the traps" applies to the AUDIT blocks. Honor both.
 
-### 4.2 `graft-inject/src/` — Phase-N references throughout, many stale
+### 4.2 `graft-inject/src/main.rs` — Phase-N references throughout, many stale
+
+> **Resolved 2026-05-11** in `vesl-nockup` commit `9bb3a96 graft-inject: strip Phase-N prefixes from comments (audit §4.2)`. 31 occurrences removed — matches the count cited in this finding exactly. Verified post-split with `rg "Phase [0-9]" tools/graft-inject/src/*.rs` (returns zero). The companion `(deleted) BLOCK_* constants — same content post-Phase 3` line at the original `main.rs:4324` is gone with the rest. The earlier doc-update commit `210bd2a` in this file mislabeled this finding as "comments travelled with the split"; that was incorrect — the strip pass landed pre-split. Original finding kept verbatim below.
 
 - **Scope:** `[vesl-nockup]`
-- **Path:** `tools/graft-inject/src/*.rs` — 31 occurrences of `Phase NNN` patterns scattered across the codebase. Pre-2026-05-12 split this lived in a single `main.rs`; the comments travelled with the code into the per-concern modules during commits `22bf3ee..6bafcbd`. Re-grep across the split tree to locate them: `rg "Phase [0-9]" tools/graft-inject/src/`.
+- **Path:** `tools/graft-inject/src/main.rs` — 31 occurrences of `Phase NNN` patterns scattered across the file
 - **Snippet (a handful, line refs):**
   ```rust
   // tools/graft-inject/src/main.rs:41
