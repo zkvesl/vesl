@@ -16,12 +16,20 @@
 ::    - %settle/%prove reject unregistered roots (must %register first)
 ::    - %settle/%prove reject duplicate note IDs (replay protection)
 ::
+::  Dispatcher layout: ++poke is a thin selector over per-cause +handle-*
+::    arms.  Handlers live in the enclosing core (the fort mold requires
+::    the inner door to expose exactly load/peek/poke), so each handler
+::    takes state as its first argument.  Settlement-guard chain lives
+::    in kernel-arms.hoon; STARK input prep lives in vesl-stark.hoon.
+::
 ::  Compiled: hoonc --new protocol/lib/vesl-kernel.hoon hoon/
 ::
 /-  *vesl
 /+  *rag-logic
 /+  *vesl-prover
 /+  *vesl-merkle
+/+  *kernel-arms
+/+  *vesl-stark
 /=  *  /common/wrapper
 /=  txv1  /common/tx-engine-1
 ::
@@ -53,6 +61,162 @@
 |%
 ++  moat  (keep versioned-state)
 ::
+++  handle-register-arm
+  |=  [state=versioned-state act=[%register hull=@ root=@]]
+  ^-  [(list effect) versioned-state]
+  =/  res  (handle-register registered.state hull.act root.act 'vesl:')
+  ?~  res  [~ state]
+  :_  state(registered u.res)
+  ^-  (list effect)
+  ~[[%registered hull.act root.act]]
+::
+++  handle-settle
+  |=  [state=versioned-state act=[%settle payload=@]]
+  ^-  [(list effect) versioned-state]
+  ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve. A malformed
+  ::  payload atom or a cell that fails the strict-mold otherwise
+  ::  panics the kernel on every attacker poke.
+  ::
+  =/  parsed
+    %-  mule  |.
+    =/  raw=*  (cue payload.act)
+    ;;(settlement-payload raw)
+  ?:  ?=(%| -.parsed)
+    ~>  %slog.[3 'vesl: malformed settle payload']
+    :_  state
+    ^-  (list effect)
+    ~[[%settle-error 'vesl: malformed payload']]
+  =/  res  (validate-settlement-args p.parsed registered.state settled.state %mutate 'vesl:')
+  ?:  ?=(%.n -.res)  [~ state]
+  =/  args=settlement-payload  args.res
+  =/  result  (settle-note note.args mani.args expected-root.args)
+  =/  new-settled  (~(put in settled.state) id.note.args)
+  :_  state(settled new-settled)
+  ^-  (list effect)
+  ~[result]
+::
+++  handle-prove
+  |=  [state=versioned-state act=[%prove payload=@]]
+  ^-  [(list effect) versioned-state]
+  ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve (see handle-settle).
+  ::
+  =/  parsed
+    %-  mule  |.
+    =/  raw=*  (cue payload.act)
+    ;;(settlement-payload raw)
+  ?:  ?=(%| -.parsed)
+    ~>  %slog.[3 'vesl: malformed prove payload']
+    :_  state
+    ^-  (list effect)
+    ~[[%prove-error 'vesl: malformed payload']]
+  =/  res  (validate-settlement-args p.parsed registered.state settled.state %mutate 'vesl:')
+  ?:  ?=(%.n -.res)  [~ state]
+  =/  args=settlement-payload  args.res
+  =/  result-note  (settle-note note.args mani.args expected-root.args)
+  =/  belt-digest=@  (split-and-fold mani.args)
+  =/  fs-formula=*  build-fs-formula
+  =/  proof-attempt
+    %-  mule  |.
+    (prove-computation belt-digest fs-formula expected-root.args hull.note.args)
+  ?.  -.proof-attempt
+    ~>  %slog.[3 'vesl: prove-computation crashed']
+    :_  state
+    ^-  (list effect)
+    ~[[%prove-failed (jam p.proof-attempt)]]
+  =/  new-settled  (~(put in settled.state) id.note.args)
+  :_  state(settled new-settled)
+  ^-  (list effect)
+  ~[[result-note p.proof-attempt]]
+::
+++  handle-sig-hash
+  |=  [state=versioned-state act=[%sig-hash seeds-jam=@ fee=@]]
+  ^-  [(list effect) versioned-state]
+  ::  AUDIT 2026-04-19 H-08: wrap cue+sieve+hash chain in mule so a
+  ::  malformed seeds-jam or shape-incompatible noun yields a typed
+  ::  error effect instead of crashing the kernel.
+  ::
+  =/  attempt
+    %-  mule  |.
+    =/  sds=seeds:txv1  ;;(seeds:txv1 (cue seeds-jam.act))
+    ^-  hash:txv1
+    %-  hash-hashable:tip5
+    [(sig-hashable:seeds:txv1 sds) leaf+fee.act]
+  :_  state
+  ^-  (list effect)
+  ?:  -.attempt
+    ~[[%sig-hash p.attempt]]
+  ~[[%sig-hash-error (jam p.attempt)]]
+::
+++  handle-tx-id
+  |=  [state=versioned-state act=[%tx-id spends-jam=@]]
+  ^-  [(list effect) versioned-state]
+  ::  AUDIT 2026-04-19 H-08: mirror handle-sig-hash — mule-wrap
+  ::  cue+sieve+hash so malformed spends-jam emits a typed error
+  ::  instead of crashing.
+  ::
+  =/  attempt
+    %-  mule  |.
+    =/  sps=spends:txv1  ;;(spends:txv1 (cue spends-jam.act))
+    ^-  tx-id:txv1
+    %-  hash-hashable:tip5
+    [leaf+%1 (hashable:spends:txv1 sps)]
+  :_  state
+  ^-  (list effect)
+  ?:  -.attempt
+    ~[[%tx-id p.attempt]]
+  ~[[%tx-id-error (jam p.attempt)]]
+::
+++  handle-diag-cue
+  |=  [state=versioned-state act=[%diag-cue seeds-jam=@]]
+  ^-  [(list effect) versioned-state]
+  ::  AUDIT 2026-04-19 H-08: wrap cue in mule — a malformed jam bunt
+  ::  otherwise crashes the kernel from this diagnostic arm.
+  ::
+  =/  attempt  (mule |.((cue seeds-jam.act)))
+  :_  state
+  ^-  (list effect)
+  ?:  -.attempt
+    =/  raw=*  p.attempt
+    =/  is-cell=?  ?=(^ raw)
+    ~[[%diag-cue is-cell raw]]
+  ~[[%diag-cue-error (jam p.attempt)]]
+::
+++  handle-diag-sieve
+  |=  [state=versioned-state act=[%diag-sieve seeds-jam=@]]
+  ^-  [(list effect) versioned-state]
+  ::  AUDIT 2026-04-19 H-08: bring cue inside mule — the earlier wrap
+  ::  protected the sieve but not the cue, so a malformed jam still
+  ::  crashed before reaching the sieve.
+  ::
+  =/  attempt
+    %-  mule  |.
+    ;;(seeds:txv1 (cue seeds-jam.act))
+  :_  state
+  ^-  (list effect)
+  ?:  -.attempt
+    ~[[%diag-sieve %fail (jam p.attempt)]]
+  ~[[%diag-sieve %ok ~]]
+::
+++  handle-diag-hash
+  |=  [state=versioned-state act=[%diag-hash seeds-jam=@ fee=@]]
+  ^-  [(list effect) versioned-state]
+  ::  AUDIT 2026-04-19 H-08: pull the cue+sieve into the mule — an
+  ::  outer ;;(seeds:txv1 ...) on a malformed cue crashes before the
+  ::  hash attempt had a chance to catch.
+  ::
+  =/  attempt
+    %-  mule  |.
+    =/  sds=seeds:txv1  ;;(seeds:txv1 (cue seeds-jam.act))
+    %-  hash-hashable:tip5
+    [(sig-hashable:seeds:txv1 sds) leaf+fee.act]
+  ?:  -.attempt
+    :_  state
+    ^-  (list effect)
+    ~[[%diag-hash %ok p.attempt]]
+  :_  state
+  ^-  (list effect)
+  ~[[%diag-hash %fail (jam p.attempt)]]
+::
 ++  inner
   |_  state=versioned-state
   ::
@@ -82,274 +246,14 @@
       ~>  %slog.[3 'vesl: invalid cause']
       [~ state]
     ?-  -.u.act
-      ::
-      ::  %register — store hull root, return confirmation
-      ::
-        %register
-      ::  Guard: reject re-registration (hull already has a root)
-      ::
-      ?:  (~(has by registered.state) hull.u.act)
-        ~>  %slog.[3 'vesl: hull already registered']
-        [~ state]
-      =/  new-reg  (~(put by registered.state) hull.u.act root.u.act)
-      :_  state(registered new-reg)
-      ^-  (list effect)
-      ~[[%registered hull.u.act root.u.act]]
-      ::
-      ::  %settle — verify manifest and transition note to %settled
-      ::    Guards: root must be registered, note ID must not be settled
-      ::
-        %settle
-      ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve. A malformed
-      ::  payload atom or a cell that fails the strict-mold otherwise
-      ::  panics the kernel on every attacker poke.
-      ::
-      =/  parsed
-        %-  mule  |.
-        =/  raw=*  (cue payload.u.act)
-        ;;(settlement-payload raw)
-      ?:  ?=(%| -.parsed)
-        ~>  %slog.[3 'vesl: malformed settle payload']
-        :_  state
-        ^-  (list effect)
-        ~[[%settle-error 'vesl: malformed payload']]
-      =/  args=settlement-payload  p.parsed
-      ::  Guard: reject unregistered roots
-      ::
-      ?.  (~(has by registered.state) hull.note.args)
-        ~>  %slog.[3 'vesl: root not registered']
-        [~ state]
-      ::  Guard: expected root must match registered root
-      ::
-      ?.  =(expected-root.args (~(got by registered.state) hull.note.args))
-        ~>  %slog.[3 'vesl: root mismatch']
-        [~ state]
-      ::  Guard: note header root must match expected root (H-07)
-      ::
-      ?.  =(root.note.args expected-root.args)
-        ~>  %slog.[3 'vesl: note root does not match expected root']
-        [~ state]
-      ::  Guard: reject duplicate note IDs (replay protection)
-      ::
-      ?:  (~(has in settled.state) id.note.args)
-        ~>  %slog.[3 'vesl: note already settled (replay rejected)']
-        [~ state]
-      =/  result  (settle-note note.args mani.args expected-root.args)
-      =/  new-settled  (~(put in settled.state) id.note.args)
-      :_  state(settled new-settled)
-      ^-  (list effect)
-      ~[result]
-      ::
-      ::  %prove — settle + generate STARK proof (atomic)
-      ::    Guards: same as %settle
-      ::    If proving crashes, nothing settles. Use %settle for
-      ::    settlement without proof.
-      ::
-        %prove
-      ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve (see %settle).
-      ::
-      =/  parsed
-        %-  mule  |.
-        =/  raw=*  (cue payload.u.act)
-        ;;(settlement-payload raw)
-      ?:  ?=(%| -.parsed)
-        ~>  %slog.[3 'vesl: malformed prove payload']
-        :_  state
-        ^-  (list effect)
-        ~[[%prove-error 'vesl: malformed payload']]
-      =/  args=settlement-payload  p.parsed
-      ::  Guard: reject unregistered roots
-      ::
-      ?.  (~(has by registered.state) hull.note.args)
-        ~>  %slog.[3 'vesl: root not registered']
-        [~ state]
-      ::  Guard: expected root must match registered root
-      ::
-      ?.  =(expected-root.args (~(got by registered.state) hull.note.args))
-        ~>  %slog.[3 'vesl: root mismatch']
-        [~ state]
-      ::  Guard: note header root must match expected root (H-07)
-      ::
-      ?.  =(root.note.args expected-root.args)
-        ~>  %slog.[3 'vesl: note root does not match expected root']
-        [~ state]
-      ::  Guard: reject duplicate note IDs (replay protection)
-      ::
-      ?:  (~(has in settled.state) id.note.args)
-        ~>  %slog.[3 'vesl: note already settled (replay rejected)']
-        [~ state]
-      ::  Verify manifest (must pass before we attempt proving)
-      ::
-      =/  result-note  (settle-note note.args mani.args expected-root.args)
-      ::  STARK input prep: split manifest text fields to 7-byte belts and
-      ::  Horner-fold to one field element (cell subjects crash the STARK
-      ::  memory table — it can't represent cell nodes as field elements).
-      ::  Root + hull are bound by vesl-prover via Fiat-Shamir; this fold
-      ::  only binds manifest content. See vesl-prover.hoon.
-      ::
-      =/  qb=(list @)  (split-to-belts query.mani.args)
-      =/  ob=(list @)  (split-to-belts output.mani.args)
-      =/  pb=(list @)  (split-to-belts prompt.mani.args)
-      =/  chunk-belts=(list @)
-        =|  acc=(list @)
-        =/  res  results.mani.args
-        |-
-        ?~  res  (flop acc)
-        $(acc (weld (flop (split-to-belts dat.chunk.i.res)) acc), res t.res)
-      =/  all-belts=(list @)
-        (weld qb (weld ob (weld pb chunk-belts)))
-      ::  Goldilocks prime: 2^64 - 2^32 + 1
-      ::
-      =/  p=@  (add (sub (bex 64) (bex 32)) 1)
-      ::  AUDIT 2026-04-19 C-lead-3: Horner polynomial fold. Plain sum
-      ::  mod p is commutative, so the STARK subject would not
-      ::  distinguish belt permutations. base = 2^56 > max belt (7 bytes)
-      ::  keeps the fold order-sensitive. `b` is accumulator; `a` is the
-      ::  current belt (per `roll`'s gate convention).
-      ::
-      =/  base=@  (bex 56)
-      =/  belt-digest=@
-        %+  roll  all-belts
-        |=  [a=@ b=@]
-        (mod (add (mul b base) a) p)
-      ::  Known-working pattern: atom subject + Nock 0/4 only.
-      ::
-      ::  TODO: AUDIT 2026-04-17 C-lead-1 — STARK formula hardcoding
-      ::
-      ::  The proved formula below is a hardcoded 64-nested-increment
-      ::  `[4 [4 [4 ... [4 [0 1]]]]]`. No version tag, no length prefix,
-      ::  no explicit commitment to the formula shape is absorbed into
-      ::  the Fiat-Shamir transcript beyond the root/hull digests set by
-      ::  vesl-prover. If the Rust prover's opcode count or structure
-      ::  silently drifts (refactor, jet change, upstream nockvm update),
-      ::  the verifier could accept a STARK that proves a *different*
-      ::  formula without raising an error.
-      ::
-      ::  Suggested fix (requires STARK-fluent reviewer):
-      ::    Hash the formula noun and absorb the digest into the
-      ::    Fiat-Shamir transcript before challenge derivation, or
-      ::    prepend a version tag to the proof header. Do not edit
-      ::    this site without cross-VM prove->verify on a perturbed
-      ::    formula to confirm binding holds.
-      ::
-      ::  See .dev/CRITICAL_LEADS.md.
-      ::
-      =/  fs-formula=*
-        =/  f=*  [0 1]
-        =|  i=@
-        |-
-        ?:  =(i 64)  f
-        $(f [4 f], i +(i))
-      =/  proof-attempt
-        %-  mule  |.
-        (prove-computation belt-digest fs-formula expected-root.args hull.note.args)
-      ?.  -.proof-attempt
-        ::  Proof FAILED — jam the trace for Rust-side decoding
-        ::
-        ~>  %slog.[3 'vesl: prove-computation crashed']
-        :_  state
-        ^-  (list effect)
-        ~[[%prove-failed (jam p.proof-attempt)]]
-      ::  Proof succeeded -- settle and return [result-note proof]
-      ::
-      =/  new-settled  (~(put in settled.state) id.note.args)
-      :_  state(settled new-settled)
-      ^-  (list effect)
-      ~[[result-note p.proof-attempt]]
-      ::
-      ::  %sig-hash — compute sig-hash from jammed seeds + fee
-      ::    Uses tx-engine's hashable infrastructure for byte-exact hashes.
-      ::    Stateless: does not modify kernel state.
-      ::
-        %sig-hash
-      ::  AUDIT 2026-04-19 H-08: wrap cue+sieve+hash chain in mule so a
-      ::  malformed seeds-jam or shape-incompatible noun yields a typed
-      ::  error effect instead of crashing the kernel.
-      ::
-      =/  attempt
-        %-  mule  |.
-        =/  sds=seeds:txv1  ;;(seeds:txv1 (cue seeds-jam.u.act))
-        ^-  hash:txv1
-        %-  hash-hashable:tip5
-        [(sig-hashable:seeds:txv1 sds) leaf+fee.u.act]
-      :_  state
-      ^-  (list effect)
-      ?:  -.attempt
-        ~[[%sig-hash p.attempt]]
-      ~[[%sig-hash-error (jam p.attempt)]]
-      ::
-      ::  %tx-id — compute tx-id from jammed spends
-      ::    Uses tx-engine's hashable infrastructure for byte-exact hashes.
-      ::    Stateless: does not modify kernel state.
-      ::
-        %tx-id
-      ::  AUDIT 2026-04-19 H-08: mirror %sig-hash — mule-wrap cue+sieve+hash
-      ::  so malformed spends-jam emits a typed error instead of crashing.
-      ::
-      =/  attempt
-        %-  mule  |.
-        =/  sps=spends:txv1  ;;(spends:txv1 (cue spends-jam.u.act))
-        ^-  tx-id:txv1
-        %-  hash-hashable:tip5
-        [leaf+%1 (hashable:spends:txv1 sps)]
-      :_  state
-      ^-  (list effect)
-      ?:  -.attempt
-        ~[[%tx-id p.attempt]]
-      ~[[%tx-id-error (jam p.attempt)]]
-      ::
-      ::  %diag-cue — CUE seeds JAM without sieve, report noun shape.
-      ::    Diagnostic: isolates CUE from type validation.
-      ::
-        %diag-cue
-      ::  AUDIT 2026-04-19 H-08: wrap cue in mule — a malformed jam bunt
-      ::  otherwise crashes the kernel from this diagnostic arm.
-      ::
-      =/  attempt  (mule |.((cue seeds-jam.u.act)))
-      :_  state
-      ^-  (list effect)
-      ?:  -.attempt
-        =/  raw=*  p.attempt
-        =/  is-cell=?  ?=(^ raw)
-        ~[[%diag-cue is-cell raw]]
-      ~[[%diag-cue-error (jam p.attempt)]]
-      ::
-      ::  %diag-sieve — CUE + sieve inside mule, catch crash.
-      ::    Diagnostic: determines if ;;(seeds:txv1 ...) is the crash site.
-      ::
-        %diag-sieve
-      ::  AUDIT 2026-04-19 H-08: bring cue inside mule — the earlier wrap
-      ::  protected the sieve but not the cue, so a malformed jam still
-      ::  crashed before reaching the sieve.
-      ::
-      =/  attempt
-        %-  mule  |.
-        ;;(seeds:txv1 (cue seeds-jam.u.act))
-      :_  state
-      ^-  (list effect)
-      ?:  -.attempt
-        ~[[%diag-sieve %fail (jam p.attempt)]]
-      ~[[%diag-sieve %ok ~]]
-      ::
-      ::  %diag-hash — full sig-hash computation inside mule
-      ::
-        %diag-hash
-      ::  AUDIT 2026-04-19 H-08: pull the cue+sieve into the mule — an
-      ::  outer ;;(seeds:txv1 ...) on a malformed cue crashes before the
-      ::  hash attempt had a chance to catch.
-      ::
-      =/  attempt
-        %-  mule  |.
-        =/  sds=seeds:txv1  ;;(seeds:txv1 (cue seeds-jam.u.act))
-        %-  hash-hashable:tip5
-        [(sig-hashable:seeds:txv1 sds) leaf+fee.u.act]
-      ?:  -.attempt
-        :_  state
-        ^-  (list effect)
-        ~[[%diag-hash %ok p.attempt]]
-      :_  state
-      ^-  (list effect)
-      ~[[%diag-hash %fail (jam p.attempt)]]
+      %register    (handle-register-arm state u.act)
+      %settle      (handle-settle state u.act)
+      %prove       (handle-prove state u.act)
+      %sig-hash    (handle-sig-hash state u.act)
+      %tx-id       (handle-tx-id state u.act)
+      %diag-cue    (handle-diag-cue state u.act)
+      %diag-sieve  (handle-diag-sieve state u.act)
+      %diag-hash   (handle-diag-hash state u.act)
     ==
   --
 --
