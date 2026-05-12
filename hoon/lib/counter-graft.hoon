@@ -1,0 +1,1 @@
+../../protocol/lib/counter-graft.hoon
