@@ -1,0 +1,22 @@
+[package]
+name = "{{project_name}}"
+version = "0.1.0"
+edition = "2021"
+description = "{{description}}"
+
+[[bin]]
+name = "{{project_name}}"
+path = "src/main.rs"
+
+[dependencies]
+nockapp       = { path = "../../../nockchain/crates/nockapp", default-features = false }
+nockvm        = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
+nockvm_macros = { path = "../../../nockchain/crates/nockvm/rust/nockvm_macros" }
+
+vesl-core    = { path = "../../crates/vesl-core" }
+nock-noun-rs = { path = "../../crates/nock-noun-rs" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+vesl-test = { git = "https://github.com/zkvesl/vesl-nockup" }
