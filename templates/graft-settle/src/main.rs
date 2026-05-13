@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::fs;
 
-use vesl_core::{Guard, Mint, Tip5Hash, tip5_to_atom_le_bytes};
-use nock_noun_rs::{jam_to_bytes, make_atom_in, make_cord_in, make_tag_in, new_stack};
+use vesl_core::{Guard, Mint, Tip5Hash, build_settle_note_poke, build_settle_register_poke};
+use nock_noun_rs::make_cord_in;
 use nockapp::kernel::boot;
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::{SystemWire, Wire};
@@ -58,13 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("\n=== step 3: Graft — registering root ===\n");
     let hull_id: u64 = 1;
     {
-        let mut slab = NounSlab::new();
-        let tag = make_tag_in(&mut slab, "settle-register");
-        let root_bytes = tip5_to_atom_le_bytes(&root);
-        let root_atom = make_atom_in(&mut slab, &root_bytes);
-        let poke = T(&mut slab, &[tag, D(hull_id), root_atom]);
-        slab.set_root(poke);
-
+        let slab = build_settle_register_poke(hull_id, &root);
         let effects = app.poke(SystemWire.to_wire(), slab).await?;
         print_effects(&effects, "register");
     }
@@ -95,72 +89,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut single_mint = Mint::new();
     let single_root = single_mint.commit(&[reports[0].1.as_bytes()]);
 
-    // Register the single-leaf root under a separate hull
+    // Register the single-leaf root under a separate hull.
     let settle_hull: u64 = 2;
+    app.poke(
+        SystemWire.to_wire(),
+        build_settle_register_poke(settle_hull, &single_root),
+    )
+    .await?;
+
+    // Settle a note committing to the single-leaf payload.
     {
-        let mut slab = NounSlab::new();
-        let tag = make_tag_in(&mut slab, "settle-register");
-        let rb = tip5_to_atom_le_bytes(&single_root);
-        let root_atom = make_atom_in(&mut slab, &rb);
-        let poke = T(&mut slab, &[tag, D(settle_hull), root_atom]);
-        slab.set_root(poke);
-        app.poke(SystemWire.to_wire(), slab).await?;
-    }
-
-    // Build and send %settle-note
-    //
-    // graft-payload: [note=[id=@ hull=@ root=@ state=[%pending ~]] data=* expected-root=@]
-    {
-        let mut slab = NounSlab::new();
-        let rb = tip5_to_atom_le_bytes(&single_root);
-
-        let note_id = D(1);
-        let note_hull = D(settle_hull);
-        let note_root = make_atom_in(&mut slab, &rb);
-        let pending_tag = make_tag_in(&mut slab, "pending");
-        let state = T(&mut slab, &[pending_tag, D(0)]);
-        let note = T(&mut slab, &[note_id, note_hull, note_root, state]);
-
-        let data = make_atom_in(&mut slab, reports[0].1.as_bytes());
-        let exp_root = make_atom_in(&mut slab, &rb);
-        let payload_noun = T(&mut slab, &[note, data, exp_root]);
-
-        let payload_bytes = {
-            let mut stack = new_stack();
-            jam_to_bytes(&mut stack, payload_noun)
-        };
-        let jammed = make_atom_in(&mut slab, &payload_bytes);
-        let tag = make_tag_in(&mut slab, "settle-note");
-        let poke = T(&mut slab, &[tag, jammed]);
-        slab.set_root(poke);
-
+        let slab = build_settle_note_poke(1, settle_hull, &single_root, reports[0].1.as_bytes());
         let effects = app.poke(SystemWire.to_wire(), slab).await?;
         print_effects(&effects, "settle-note");
     }
 
-    // Replay protection: same note ID should produce %settle-error
+    // Replay protection: identical poke (same note-id) → %settle-error.
     {
-        let mut slab = NounSlab::new();
-        let rb = tip5_to_atom_le_bytes(&single_root);
-
-        let note = T(&mut slab, &[
-            D(1), D(settle_hull),
-            make_atom_in(&mut slab, &rb),
-            T(&mut slab, &[make_tag_in(&mut slab, "pending"), D(0)]),
-        ]);
-        let data = make_atom_in(&mut slab, reports[0].1.as_bytes());
-        let exp_root = make_atom_in(&mut slab, &rb);
-        let payload_noun = T(&mut slab, &[note, data, exp_root]);
-
-        let payload_bytes = {
-            let mut stack = new_stack();
-            jam_to_bytes(&mut stack, payload_noun)
-        };
-        let jammed = make_atom_in(&mut slab, &payload_bytes);
-        let tag = make_tag_in(&mut slab, "settle-note");
-        let poke = T(&mut slab, &[tag, jammed]);
-        slab.set_root(poke);
-
+        let slab = build_settle_note_poke(1, settle_hull, &single_root, reports[0].1.as_bytes());
         let effects = app.poke(SystemWire.to_wire(), slab).await?;
         print_effects(&effects, "replay (expect error)");
     }
