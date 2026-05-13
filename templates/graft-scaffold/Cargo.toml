@@ -1,3 +1,4 @@
+# ci: skip-template-check (path-deps require user fixup)
 [package]
 name = "my-nockapp"
 version = "0.1.0"
