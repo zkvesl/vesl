@@ -83,23 +83,6 @@ pub struct GraftPayload {
     pub expected_root: Tip5Hash,
 }
 
-/// A leaf with its Merkle inclusion proof — generic payload unit for Forge.
-/// Mirrors Hoon: `[dat=@ proof=(list [hash=@ side=?])]`
-#[derive(Debug, Clone)]
-pub struct LeafWithProof {
-    pub dat: Vec<u8>,
-    pub proof: Vec<ProofNode>,
-}
-
-/// Generic STARK proof payload — mirrors forge-kernel.hoon's forge-payload.
-/// `[note leaves expected-root]` where leaves carry their own Merkle proofs.
-#[derive(Debug, Clone)]
-pub struct ForgePayload {
-    pub note: Note,
-    pub leaves: Vec<LeafWithProof>,
-    pub expected_root: Tip5Hash,
-}
-
 /// Commitment verification trait. Implement for your computation type.
 /// `RagVerifier` is the built-in implementation for RAG manifests.
 ///

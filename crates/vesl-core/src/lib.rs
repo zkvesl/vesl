@@ -16,7 +16,6 @@ pub mod noun_builder;
 pub mod tx_builder;
 pub mod guard;
 pub mod mint;
-pub mod forge;
 pub mod graft_pokes;
 pub mod peek;
 pub mod signing;
@@ -35,7 +34,6 @@ pub use types::{
     ChainClient, ChainConfig, WalletClient, WalletConfig,
     format_tip5, hash_leaf, hash_pair, tip5_to_atom_le_bytes, verify_proof,
     CommitmentVerifier, GraftPayload, NounSlab,
-    ForgePayload, LeafWithProof,
 };
 // Deprecated alias — remove in next minor release. Callers should migrate to CommitmentVerifier.
 #[allow(deprecated)]
