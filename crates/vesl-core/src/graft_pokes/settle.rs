@@ -346,8 +346,10 @@ where
 /// ```
 ///
 /// `data` is the caller-supplied noun — flat atom for the default
-/// hash-gate, structured cell for catalog gates.
-fn build_graft_single_leaf_payload_in(
+/// hash-gate, structured cell for catalog gates. Hull / note-id route
+/// through `atom_from_u64` so hash-derived IDs above `DIRECT_MAX` don't
+/// panic the noun constructor.
+pub fn build_graft_single_leaf_payload_in(
     slab: &mut NounSlab,
     note_id: u64,
     hull: u64,
@@ -363,6 +365,41 @@ fn build_graft_single_leaf_payload_in(
     let note = T(slab, &[id, hull_atom, note_root, state]);
     let exp_root = make_atom_in(slab, &root_bytes);
     T(slab, &[note, data, exp_root])
+}
+
+/// Convenience over [`build_graft_single_leaf_payload_in`]: build the
+/// payload from raw `data` bytes and return the jammed atom. Use when
+/// you need pre-jammed payload bytes (e.g. to wrap in
+/// [`build_settle_poke_jammed`] later, or to replay across harness
+/// calls).
+pub fn build_graft_single_leaf_payload_jammed(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    data: &[u8],
+) -> Vec<u8> {
+    let mut slab = NounSlab::new();
+    let data_atom = make_atom_in(&mut slab, data);
+    let payload = build_graft_single_leaf_payload_in(&mut slab, note_id, hull, root, data_atom);
+    let mut stack = new_stack();
+    jam_to_bytes(&mut stack, payload)
+}
+
+/// Build a `[%<verb> jammed]` poke wrapping pre-jammed graft-payload
+/// bytes. The verb is one of `settle-note`, `settle-verify`, or any
+/// future graft cause tag that consumes a pre-jammed payload atom.
+///
+/// Production code typically uses [`build_settle_note_poke`] /
+/// [`build_settle_verify_poke`] which build the payload inline. Reach
+/// for this when you need to construct the payload separately — replay
+/// tests, tampered-payload assertions, cross-harness payload re-use.
+pub fn build_settle_poke_jammed(verb: &str, payload: &[u8]) -> NounSlab {
+    let mut slab = NounSlab::new();
+    let tag = make_tag_in(&mut slab, verb);
+    let jammed = make_atom_in(&mut slab, payload);
+    let poke = T(&mut slab, &[tag, jammed]);
+    slab.set_root(poke);
+    slab
 }
 
 #[cfg(test)]
@@ -430,6 +467,29 @@ mod tests {
         let hull = u64::MAX - 7;
         let _slab = build_settle_register_poke(hull, &fixture_root());
         let _slab2 = build_settle_note_poke(u64::MAX - 11, hull, &fixture_root(), b"x");
+    }
+
+    #[test]
+    fn build_graft_single_leaf_payload_jammed_handles_large_ids() {
+        // Same DIRECT_MAX guarantee for the standalone jammed-payload
+        // builder — vesl-test harnesses pass hash-derived hull/note IDs
+        // through this path.
+        let bytes = build_graft_single_leaf_payload_jammed(
+            u64::MAX - 11,
+            u64::MAX - 7,
+            &fixture_root(),
+            b"x",
+        );
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn build_settle_poke_jammed_wraps_payload() {
+        let payload =
+            build_graft_single_leaf_payload_jammed(1, 1, &fixture_root(), b"hello");
+        let slab = build_settle_poke_jammed("settle-verify", &payload);
+        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        assert!(!bytes.is_empty());
     }
 
     #[test]
