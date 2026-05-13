@@ -73,20 +73,13 @@
 ++  handle-settle
   |=  [state=versioned-state act=[%settle payload=@]]
   ^-  [(list effect) versioned-state]
-  ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve. A malformed
-  ::  payload atom or a cell that fails the strict-mold otherwise
-  ::  panics the kernel on every attacker poke.
-  ::
-  =/  parsed
-    %-  mule  |.
-    =/  raw=*  (cue payload.act)
-    ;;(settlement-payload raw)
-  ?:  ?=(%| -.parsed)
+  =/  parsed  (parse-payload payload.act)
+  ?~  parsed
     ~>  %slog.[3 'vesl: malformed settle payload']
     :_  state
     ^-  (list effect)
     ~[[%settle-error 'vesl: malformed payload']]
-  =/  res  (validate-settlement-args p.parsed registered.state settled.state %mutate 'vesl:')
+  =/  res  (validate-settlement-args u.parsed registered.state settled.state %mutate 'vesl:')
   ?:  ?=(%.n -.res)  [~ state]
   =/  args=settlement-payload  args.res
   =/  result  (settle-note note.args mani.args expected-root.args)
@@ -98,18 +91,13 @@
 ++  handle-prove
   |=  [state=versioned-state act=[%prove payload=@]]
   ^-  [(list effect) versioned-state]
-  ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve (see handle-settle).
-  ::
-  =/  parsed
-    %-  mule  |.
-    =/  raw=*  (cue payload.act)
-    ;;(settlement-payload raw)
-  ?:  ?=(%| -.parsed)
+  =/  parsed  (parse-payload payload.act)
+  ?~  parsed
     ~>  %slog.[3 'vesl: malformed prove payload']
     :_  state
     ^-  (list effect)
     ~[[%prove-error 'vesl: malformed payload']]
-  =/  res  (validate-settlement-args p.parsed registered.state settled.state %mutate 'vesl:')
+  =/  res  (validate-settlement-args u.parsed registered.state settled.state %mutate 'vesl:')
   ?:  ?=(%.n -.res)  [~ state]
   =/  args=settlement-payload  args.res
   =/  result-note  (settle-note note.args mani.args expected-root.args)

@@ -87,19 +87,13 @@
       ::    Guards: root must be registered, note ID must not be settled
       ::
         %settle
-      ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve so a malformed
-      ::  payload atom emits a typed error instead of panicking.
-      ::
-      =/  parsed
-        %-  mule  |.
-        =/  raw=*  (cue payload.u.act)
-        ;;(settlement-payload raw)
-      ?:  ?=(%| -.parsed)
+      =/  parsed  (parse-payload payload.u.act)
+      ?~  parsed
         ~>  %slog.[3 'settle: malformed settle payload']
         :_  state
         ^-  (list effect)
         ~[[%settle-error 'settle: malformed payload']]
-      =/  res  (validate-settlement-args p.parsed registered.state settled.state %mutate 'settle:')
+      =/  res  (validate-settlement-args u.parsed registered.state settled.state %mutate 'settle:')
       ?:  ?=(%.n -.res)  [~ state]
       =/  args=settlement-payload  args.res
       =/  result  (settle-note note.args mani.args expected-root.args)
@@ -111,19 +105,12 @@
       ::  %verify — verify manifest (read-only, no state change)
       ::
         %verify
-      ::  AUDIT 2026-04-19 M-02: mule-wrap cue + sieve. %verify is a
-      ::  read-only soft preflight — crashing on malformed payload
-      ::  contradicts the contract for polling callers.
-      ::
-      =/  parsed
-        %-  mule  |.
-        =/  raw=*  (cue payload.u.act)
-        ;;(settlement-payload raw)
-      ?:  ?=(%| -.parsed)
+      =/  parsed  (parse-payload payload.u.act)
+      ?~  parsed
         :_  state
         ^-  (list effect)
         ~[[%verified %.n]]
-      =/  res  (validate-settlement-args p.parsed registered.state settled.state %verify 'settle:')
+      =/  res  (validate-settlement-args u.parsed registered.state settled.state %verify 'settle:')
       ?:  ?=(%.n -.res)
         :_  state
         ^-  (list effect)

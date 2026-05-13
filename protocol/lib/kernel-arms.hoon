@@ -1,9 +1,8 @@
 ::  protocol/lib/kernel-arms.hoon: shared dispatch arms for vesl kernels
 ::
-::  Centralizes the %register dup-check and the settlement-guard chain
-::  duplicated across guard/mint/settle/vesl kernels.  See audit
-::  §2.3 (four byte-identical %register arms) and §2.4 (settlement-guard
-::  chain at five sites).
+::  Centralizes the %register dup-check, the mule-wrap cue+sieve
+::  preamble, and the settlement-guard chain duplicated across
+::  guard/mint/settle/vesl kernels.
 ::
 ::  Consumed via /+  *kernel-arms in the kernel libraries.
 ::
@@ -22,6 +21,22 @@
     ~>  %slog.[3 (rap 3 ~[label ' hull already registered'])]
     ~
   `(~(put by registered) hull root)
+::  +parse-payload: shared mule-wrap cue + sieve preamble.
+::    Returns ~ on parse failure (caller emits its own slog + effect),
+::    [~ settlement-payload] on success.  Each kernel site differs only
+::    in slog message and failure-effect shape (typed [%verb-error msg]
+::    in mutate mode, [%verified %.n] in read-only mode), so the helper
+::    owns just the parse step.
+::
+++  parse-payload
+  |=  payload=@
+  ^-  (unit settlement-payload)
+  =/  parsed
+    %-  mule  |.
+    =/  raw=*  (cue payload)
+    ;;(settlement-payload raw)
+  ?:  ?=(%| -.parsed)  ~
+  `p.parsed
 ::  +validate-settlement-args: shared settlement-guard chain.
 ::    Chain order: root-registered, expected-root match, note-root
 ::    match, replay (mutate mode only — verify mode preserves legacy
