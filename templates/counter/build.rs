@@ -5,8 +5,8 @@ use std::{env, fs};
 fn main() {
     println!("cargo:rerun-if-changed=hoon/app/app.hoon");
     println!("cargo:rerun-if-changed=hoon/lib/lib.hoon");
-    // Manifest changes affect the generated kernel_cause_tags.rs;
-    // re-run when any .toml under hoon/lib/ moves.
+    // Manifest changes affect the generated kernel_cause_tags.rs; re-run
+    // when any .toml under hoon/lib/ moves.
     println!("cargo:rerun-if-changed=hoon/lib");
 
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -43,12 +43,11 @@ fn main() {
     }
 }
 
-/// Drift-detection codegen: emit `kernel_cause_tags.rs` so drivers
-/// can `include!` the slice + `assert_kernel_cause_tag!` macro and
-/// have cargo build catch driver/kernel cause-tag drift. Failures
-/// are warnings — drivers can opt out by gating the macro on
-/// `cfg(any())` or by skipping the include — so the build still
-/// succeeds when graft-inject isn't installed.
+/// Drift-detection codegen: emit `kernel_cause_tags.rs` so drivers can
+/// `include!` the slice + `assert_kernel_cause_tag!` macro, letting cargo
+/// build catch driver/kernel cause-tag drift. Failures are warnings —
+/// drivers can opt out by gating the macro on `cfg(any())` or skipping the
+/// include — so the build still succeeds when graft-inject isn't installed.
 fn emit_kernel_cause_tags(out_dir: &str, hoon_app_file: &str) {
     let cause_tags_out = format!("{}/kernel_cause_tags.rs", out_dir);
     let result = Command::new("graft-inject")
@@ -77,8 +76,7 @@ fn emit_kernel_cause_tags(out_dir: &str, hoon_app_file: &str) {
             e
         ),
     }
-    // Suppress `fs` unused-import warning when the simple build.rs path
-    // doesn't otherwise reach into fs. Future codegen targets may write
-    // structured output here, so keep the import live.
+    // Keeps the `fs` import live for future codegen targets that write
+    // structured output here; suppresses the unused-import warning meanwhile.
     let _ = fs::metadata(out_dir);
 }

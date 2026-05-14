@@ -17,18 +17,16 @@
 //! `meta.toml` with the source app.hoon SHA-256, timestamp, and
 //! nockapp crate version. `resume()` parses the meta, sets
 //! [`nockapp::kernel::boot::Cli::state_jam`] to the snapshot's
-//! `state.jam`, and calls [`nockapp::kernel::boot::setup`] — i.e., it
-//! reuses the existing import path inside nockapp; no companion
-//! upstream patch on the resume side.
+//! `state.jam`, and calls [`nockapp::kernel::boot::setup`] — reusing
+//! nockapp's existing import path, no companion upstream patch.
 //!
 //! The schema-migration helper (declarative state-shape diff or
-//! per-transition migrators) is intentionally out of scope here. Wait
-//! for actual cumulative-domain pressure to surface what shape it
-//! should take.
+//! per-transition migrators) is intentionally out of scope; wait for
+//! cumulative-domain pressure to surface what shape it should take.
 //!
-//! The reference consumer is the meta-mode dogfood driver documented in
+//! Reference consumer: the meta-mode dogfood driver documented in
 //! `vesl-core/.dev/DOGFOOD_META.md` "Per-transition procedure" Step 5
-//! ("State-shape compatibility check"); see that doc for the
+//! ("State-shape compatibility check") — see that doc for the
 //! `snapshot-state` / `restore-state-and-exercise` driver wiring.
 
 use std::path::{Path, PathBuf};
@@ -42,33 +40,29 @@ use sha2::{Digest, Sha256};
 
 /// Bundle returned by [`snapshot`] and consumed by [`resume`].
 ///
-/// `dir` is the directory holding the snapshot artifacts
-/// (`state.jam` plus `meta.toml`). Callers can persist `Snapshot`
-/// directly via `serde` if they want a typed handle, or just hold
-/// the `dir: PathBuf` and reconstruct via [`Snapshot::load`] later.
+/// `dir` holds the snapshot artifacts (`state.jam` plus `meta.toml`).
+/// Callers can persist `Snapshot` directly via `serde` for a typed
+/// handle, or just hold `dir` and reconstruct via [`Snapshot::load`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     /// Directory holding the snapshot files.
     pub dir: PathBuf,
     /// Hex-encoded SHA-256 of the app.hoon source at snapshot time.
-    /// Lets resumes verify the consumer is loading state into a
-    /// kernel built from the same Hoon (mismatches are warnings, not
-    /// errors, since composition changes are the whole point of
-    /// snapshot/resume).
+    /// Lets resumes check whether state is loading into a kernel built
+    /// from the same Hoon. Mismatches are warnings, not errors —
+    /// composition changes are the whole point of snapshot/resume.
     pub source_sha256: String,
     /// Wall-clock when `snapshot` returned.
     pub timestamp: SystemTime,
     /// `CARGO_PKG_VERSION` of the `vesl-checkpoint` crate that wrote
     /// the snapshot. Lets future versions detect format-incompatible
-    /// older bundles (no migration logic ships with this version —
-    /// the field is forward-looking).
+    /// older bundles — forward-looking; no migration logic ships yet.
     pub vesl_checkpoint_version: String,
 }
 
 impl Snapshot {
-    /// Read a previously written snapshot from `dir`. Equivalent to
-    /// holding the [`Snapshot`] returned by [`snapshot`] across a
-    /// restart.
+    /// Read a previously written snapshot from `dir` — equivalent to
+    /// holding the [`Snapshot`] from [`snapshot`] across a restart.
     pub async fn load(dir: &Path) -> Result<Self> {
         let meta_path = dir.join(META_TOML);
         let bytes = tokio::fs::read(&meta_path)
@@ -89,8 +83,7 @@ impl Snapshot {
 
     /// Path to the bundled `state.jam`. Set this on
     /// [`nockapp::kernel::boot::Cli::state_jam`] (or pass through
-    /// [`resume`]) to load the captured kernel state into a fresh
-    /// boot.
+    /// [`resume`]) to load the captured kernel state into a fresh boot.
     pub fn state_jam(&self) -> PathBuf {
         self.dir.join(STATE_JAM)
     }
@@ -104,13 +97,13 @@ impl Snapshot {
 ///   `Cli::state_jam` import on resume.
 /// - `dir/meta.toml` — source SHA-256, timestamp, nockapp version.
 ///
-/// The app is not consumed; callers can keep poking it after the
-/// snapshot returns. (Contrast with `boot::setup`'s
-/// `cli.export_state_jam` path, which exits after writing.)
+/// The app is not consumed; callers can keep poking it after this
+/// returns. (Contrast `boot::setup`'s `cli.export_state_jam` path,
+/// which exits after writing.)
 ///
-/// `source_app_hoon` is the file used to compile this kernel — the
-/// snapshot records its sha256 so a future `resume` can detect "you
-/// loaded into a different kernel build" if needed.
+/// `source_app_hoon` is the file this kernel was compiled from; its
+/// sha256 is recorded so a future `resume` can detect a mismatched
+/// kernel build.
 pub async fn snapshot(
     app: &NockApp,
     dir: &Path,
@@ -155,34 +148,31 @@ pub async fn snapshot(
 /// Boot a fresh `NockApp` from `jam_path` with the snapshot's state
 /// imported.
 ///
-/// Reads the kernel jam at `jam_path` (typically the freshly compiled
-/// out.jam from the new kernel build), constructs a boot `Cli` whose
-/// `state_jam` field points at the snapshot's `state.jam`, and runs
-/// `boot::setup`. The import path inside nockapp picks up the
-/// `state_jam` and rehydrates the kernel state on top of the new
-/// kernel definition.
+/// Reads the kernel jam at `jam_path` (typically the new build's
+/// out.jam), constructs a boot `Cli` with `state_jam` pointing at the
+/// snapshot's `state.jam`, and runs `boot::setup`. Nockapp's import
+/// path picks up `state_jam` and rehydrates kernel state on top of the
+/// new kernel definition.
 ///
 /// Mismatch handling: if the new kernel's `++load` arm rejects the
-/// snapshotted state shape, `boot::setup` propagates the error.
-/// Schema migration is the consumer's responsibility (see crate-level
-/// docs — out of scope here).
+/// snapshotted state shape, `boot::setup` propagates the error. Schema
+/// migration is the consumer's responsibility (see crate-level docs).
 ///
 /// **Schema-extension migration (RM4 §1, v0.2).** Same-composition
-/// resume (the new kernel has the same set of grafts as the snapshot)
+/// resume (new kernel has the same graft set as the snapshot)
 /// roundtrips cleanly — pre- and post-resume pokes both emit effects.
-/// **Schema-extension resume** (the new kernel adds grafts that
-/// weren't in the snapshot) works in v0.2 via graft-inject codegen at
-/// the `nockup:load-defaults` marker: the marker template's `++load`
-/// arm ships an identity `old-state` placeholder, and graft-inject
+/// **Schema-extension resume** (new kernel adds grafts absent from the
+/// snapshot) works in v0.2 via graft-inject codegen at the
+/// `nockup:load-defaults` marker: the marker template's `++load` arm
+/// ships an identity `old-state` placeholder, and graft-inject
 /// replaces it with a `=/ defaults ^*(versioned-state)` +
-/// `%_ defaults <field> ^*(<field>-state) ... ==` overlay so resumed
+/// `%_ defaults <field> ^*(<field>-state) ... ==` overlay, so resumed
 /// snapshots with a smaller noun shape get type defaults at the new
 /// graft axes instead of panicking inside the wrapper's mule guard.
 /// Pre-v0.2 (no marker, identity load) silently dropped effects on
-/// every graft past the first added priority band; that mode no
-/// longer ships. Per-graft state is reset to type defaults on every
-/// resume in v0.2; operators who need data preservation re-poke
-/// after resume to restore the desired state.
+/// every graft past the first added priority band; that mode no longer
+/// ships. v0.2 resets per-graft state to type defaults on every
+/// resume; operators needing data preservation re-poke after resume.
 pub async fn resume(
     jam_path: &Path,
     snapshot: &Snapshot,

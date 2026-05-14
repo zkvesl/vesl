@@ -3,8 +3,8 @@
 //! Every commitment graft (mint/guard/settle) and state graft
 //! (kv/counter/queue/registry/log/etc.) ships a `++peek` arm whose
 //! result is wrapped as `[~ [~ (unit @)]]` — three layers of unit
-//! around an atom. Drivers calling `app.peek(slab)` need the same
-//! ~50 lines of slab construction + tail-walking to read out a value.
+//! around an atom. Without these helpers, every driver re-implements
+//! the same slab construction + tail-walking to read out a value.
 //!
 //! Path-builders here cover the three shapes that v0.1 grafts use:
 //!
@@ -25,9 +25,9 @@
 //! they walk an `&[NounSlab]` effect list rather than a single peek
 //! slab, but the noun-walking idioms are the same.
 //!
-//! [`effect_head_tag`] / [`effect_head_tags`] are the generic
-//! head-atom rendering helpers — drivers that only need the cause-tag
-//! of an effect should call these instead of re-implementing the
+//! [`effect_head_tag`] / [`effect_head_tags`] render an effect's
+//! head-atom tag — drivers that only need the cause-tag should call
+//! these instead of re-implementing the
 //! `slab.root() → as_cell → head().as_atom → from_utf8` dance.
 //!
 //! See zkvesl-docs `reference/sdk.md` "Peek calls from Rust" for

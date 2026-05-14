@@ -17,8 +17,8 @@
 //!
 //! Phase 12A renamed the primitive from `vesl-graft` to `settle-graft`
 //! across the Hoon + Rust surface. Deprecated `build_vesl_*_poke`
-//! aliases are kept for one release cycle in `crate::lib`.
-//!  `%vesl-settle` → `%settle-note` drops the tautological
+//! aliases are kept for one release cycle in `crate::lib`. The
+//! `%vesl-settle` → `%settle-note` rename drops the tautological
 //! `%settle-settle` and avoids collision with `%mint-commit`.
 
 use nock_noun_rs::{

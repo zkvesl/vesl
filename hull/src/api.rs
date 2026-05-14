@@ -45,8 +45,8 @@ pub struct Field {
 
 /// Shared state for the HTTP API.
 ///
-/// Held behind `Arc<Mutex<...>>`. No LLM, no retriever — a single
-/// mutex is sufficient since no handler blocks for long.
+/// Held behind `Arc<Mutex<...>>`. A single mutex suffices since no
+/// handler blocks for long.
 pub struct AppState {
     pub app: NockApp,
     pub fields: Vec<Field>,
@@ -74,11 +74,11 @@ pub fn load_note_counter(output_dir: &std::path::Path) -> u64 {
 }
 
 fn save_note_counter(output_dir: &std::path::Path, counter: u64) {
-    // AUDIT 2026-04-17 L-05: atomic write via tempfile + rename. Does
-    // not prevent read-modify-write races between two hull processes
-    // sharing `output_dir` (still a single-writer invariant by
-    // design), but eliminates torn writes if the process is killed
-    // mid-write or if two writers race by coincidence.
+    // AUDIT 2026-04-17 L-05: atomic write via tempfile + rename.
+    // Eliminates torn writes on mid-write kill or coincidental racing
+    // writers, but does not prevent read-modify-write races between two
+    // hull processes sharing `output_dir` — that's still a
+    // single-writer invariant by design.
     let path = output_dir.join(NOTE_COUNTER_FILE);
     let tmp = output_dir.join(format!("{NOTE_COUNTER_FILE}.{}.tmp", std::process::id()));
     if std::fs::write(&tmp, counter.to_string()).is_ok() {
@@ -169,10 +169,9 @@ static NO_AUTH: AtomicBool = AtomicBool::new(false);
 
 /// API key authentication middleware (C-004).
 ///
-/// Checks `Authorization: Bearer <key>` against HULL_API_KEY env var.
-/// /health is always exempt.
-///
-/// Auth is required by default. To skip, pass `--no-auth` at startup.
+/// Checks `Authorization: Bearer <key>` against the HULL_API_KEY env
+/// var. /health is always exempt. Auth is required unless `--no-auth`
+/// is passed at startup.
 async fn check_api_key(
     req: axum::extract::Request,
     next: middleware::Next,
@@ -181,7 +180,7 @@ async fn check_api_key(
         return Ok(next.run(req).await);
     }
 
-    // --no-auth disables auth entirely (C-004: explicit opt-out only)
+    // --no-auth disables auth entirely (C-004: explicit opt-out)
     if NO_AUTH.load(Ordering::Relaxed) {
         return Ok(next.run(req).await);
     }
@@ -205,14 +204,14 @@ async fn check_api_key(
 
 /// Pre-flight auth check (C-004). Call before starting the server.
 ///
-/// Loopback-only entry point. Production callers should use
+/// Assumes a loopback bind. Production callers should use
 /// `check_auth_config_with_bind` so the M-15 non-loopback refusal runs.
 pub fn check_auth_config(no_auth: bool) -> Result<(), String> {
     check_auth_config_with_bind(no_auth, "127.0.0.1")
 }
 
-/// Variant used by the CLI entry point — knows the bind address, so
-/// it can reject `--no-auth` on non-loopback binds.
+/// CLI-entry-point variant — knows the bind address, so it can reject
+/// `--no-auth` on non-loopback binds.
 ///
 /// AUDIT 2026-04-19 M-15: `--no-auth` on an exposed bind leaks state
 /// and lets anyone poke the kernel. Fail-closed when `no_auth` is set
@@ -406,7 +405,7 @@ async fn settle_handler(
     let note_id = req.note_id.unwrap_or(st.note_counter);
     save_note_counter(&st.output_dir, st.note_counter);
 
-    // Poke kernel with register (settlement primitive for generic hull)
+    // Register is the settlement primitive for the generic hull
     let settle_poke = vesl_core::noun_builder::build_register_poke(st.hull_id, &root);
     let effects = tokio::time::timeout(
         std::time::Duration::from_secs(30),

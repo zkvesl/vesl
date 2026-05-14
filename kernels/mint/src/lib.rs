@@ -1,9 +1,8 @@
 //! Vesl Mint kernel JAM embedding crate.
 //!
 //! Embeds the compiled Hoon kernel at build time; runtime sha256-
-//! verifies the embedded bytes match what build.rs hashed. Kernel
-//! source: protocol/lib/mint-kernel.hoon.
-//! AUDIT 2026-04-17 M-07: runtime sha256 check.
+//! verifies the embedded bytes match what build.rs hashed (AUDIT
+//! 2026-04-17 M-07). Kernel source: protocol/lib/mint-kernel.hoon.
 
 use sha2::{Digest, Sha256};
 

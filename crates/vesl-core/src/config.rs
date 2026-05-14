@@ -119,14 +119,13 @@ pub struct WalletRoleToml {
 ///
 /// Grouped so adding a new CLI flag isn't a breaking change at every callsite
 /// (audit MAINTENANCE_AUDIT_LOG.md §3.1, deferred from commit 9c446dd).
-/// Resolution order is unchanged: CLI > env > toml > mode defaults.
+/// Resolution order: CLI > env > toml > mode defaults.
 ///
 /// CLI-side wallet overrides are intentionally minimal: `account` (the
-/// per-agent account index) is the one knob that's commonly worth a flag.
+/// per-agent account index) is the one knob commonly worth a flag.
 /// Per-role index/role overrides live in TOML only — flipping them on
-/// the command line would silently re-derive a different key, which is
-/// exactly the kind of footgun the `[wallet]` config-toggle pattern is
-/// designed to avoid.
+/// the command line would silently re-derive a different key, the
+/// footgun the `[wallet]` config-toggle pattern exists to avoid.
 #[derive(Debug, Default)]
 pub struct SettlementCliOverrides {
     pub mode: Option<SettlementMode>,
@@ -236,12 +235,12 @@ impl SettlementConfig {
     /// Resolution order: CLI > env > toml > mode defaults.
     /// Backward compat: `--chain-endpoint` without `--settlement-mode` infers fakenet.
     ///
-    /// `default_signing_key`: the signing key to use for fakenet mode. Typically
-    /// the demo signing key, but callers can provide any key.
+    /// `default_signing_key`: the signing key for fakenet mode. Typically
+    /// the demo key, but callers can provide any key.
     ///
     /// AUDIT 2026-04-19 L-14: returns `Result` instead of `.expect`-ing
     /// on misconfiguration, so main.rs can print an operator-actionable
-    /// error and exit cleanly instead of printing a Rust panic trace.
+    /// error and exit cleanly rather than a Rust panic trace.
     pub fn resolve_checked(
         overrides: &SettlementCliOverrides,
         toml: &SettlementToml,

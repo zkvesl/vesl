@@ -19,8 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut app: NockApp =
         boot::setup(&kernel, cli, &[], "settle-report", None).await?;
 
-    // Step 1: Commit data for ID 1
-    // The kernel stores shax(data) as the commitment hash
+    // Step 1: Commit data for ID 1; the kernel stores shax(data) as the commitment.
     let mut slab = NounSlab::new();
     let poke = T(&mut slab, &[
         D(tas!(b"commit")),
@@ -33,8 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let effects = app.poke(SystemWire.to_wire(), slab).await?;
     print_effects(&effects);
 
-    // Step 2: Settle with the same data (should succeed)
-    // shax(42) matches the commitment
+    // Step 2: Settle with the same data — shax(42) matches the commitment (should succeed)
     let mut slab = NounSlab::new();
     let poke = T(&mut slab, &[
         D(tas!(b"settle")),

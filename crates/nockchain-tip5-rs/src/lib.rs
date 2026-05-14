@@ -131,20 +131,18 @@ pub fn tip5_to_atom_le_bytes(hash: &Tip5Hash) -> Vec<u8> {
 ///
 /// # Trailing-zero normalization (AUDIT 2026-04-17 L-07)
 ///
-/// Input bytes are interpreted as the little-endian representation of
-/// a Hoon atom (bignum). Trailing zero bytes are **stripped** via
-/// `rposition` before chunking — this matches Hoon's bignum form,
-/// where `0x05` and `0x05 00 00` are the same atomic value. Both
-/// sides of the cross-VM boundary (this function and the Hoon
-/// `split-to-belts` in `protocol/lib/vesl-merkle.hoon`) normalize
-/// identically, so the hash of `"x"` equals the hash of `"x\0"`
-/// equals the hash of `"x\0\0\0"`.
+/// Input bytes are the little-endian form of a Hoon atom (bignum).
+/// Trailing zero bytes are **stripped** via `rposition` before
+/// chunking — matching Hoon's bignum form, where `0x05` and
+/// `0x05 00 00` are the same value. Both sides of the cross-VM
+/// boundary (this function and the Hoon `split-to-belts` in
+/// `protocol/lib/vesl-merkle.hoon`) normalize identically, so the hash
+/// of `"x"`, `"x\0"`, and `"x\0\0\0"` are all equal.
 ///
-/// Callers that use byte-length as a distinguishing feature between
-/// logically-distinct payloads **will see hash collisions**. The
-/// canonical workaround is to encode length into the payload
-/// explicitly — e.g. prepend the length as a 4-byte field, or wrap
-/// the payload with a domain-separating prefix before hashing.
+/// Callers that treat byte-length as distinguishing between
+/// logically-distinct payloads **will see hash collisions**. Fix:
+/// encode length into the payload explicitly — e.g. prepend a 4-byte
+/// length field, or add a domain-separating prefix before hashing.
 fn atom_bytes_to_belts(bytes: &[u8]) -> Vec<Belt> {
     let len = bytes.iter().rposition(|&b| b != 0).map_or(0, |p| p + 1);
     if len == 0 {
@@ -191,10 +189,9 @@ pub fn hash_pair(l: &Tip5Hash, r: &Tip5Hash) -> Tip5Hash {
 ///   `side=false` -> sibling is RIGHT -> `hash_pair(current, sibling)`
 pub fn verify_proof(leaf_data: &[u8], proof: &[ProofNode], expected_root: &Tip5Hash) -> bool {
     // Depth guard: match Hoon's 64-node limit.
-    // AUDIT 2026-04-17 L-01: a silent `false` return here is
-    // indistinguishable from "wrong proof" at the caller. Emit a warn
-    // so oversize proofs surface in logs instead of looking like
-    // generic verification failures.
+    // AUDIT 2026-04-17 L-01: a silent `false` here is indistinguishable
+    // from "wrong proof" at the caller — warn so oversize proofs
+    // surface in logs instead of looking like generic failures.
     if proof.len() > 64 {
         tracing::warn!(
             proof_depth = proof.len(),

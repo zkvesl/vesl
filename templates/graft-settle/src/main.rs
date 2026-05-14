@@ -77,12 +77,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // --- step 5: settle a report ---
     //
-    // Build a graft-payload noun, jam it, and poke %settle-note.
-    // The kernel's Graft verifies via the hash gate, then transitions
-    // the note to %settled. Replay protection prevents double-settlement.
+    // Build a graft-payload noun, jam it, poke %settle-note. The kernel's
+    // Graft verifies via the hash gate, then transitions the note to
+    // %settled; replay protection prevents double-settlement.
     //
-    // For the hash gate to pass, we need a single-leaf tree where
-    // root == hash-leaf(data). Multi-leaf roots need a manifest gate.
+    // The hash gate only passes on a single-leaf tree (root ==
+    // hash-leaf(data)). Multi-leaf roots need a manifest gate.
 
     println!("\n=== step 5: settlement ===\n");
 

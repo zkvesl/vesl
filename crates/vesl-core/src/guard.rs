@@ -95,13 +95,11 @@ impl Guard {
 
     /// Verify a full manifest (all chunks + prompt integrity).
     ///
-    /// Mirrors rag-logic.hoon ++verify-manifest:
-    /// 1. For each retrieval, verify chunk proof against root
-    /// 2. Collect chunk dats in order
-    /// 3. Reconstruct prompt: query + "\n" + chunk0.dat + "\n" + chunk1.dat + ...
-    /// 4. Compare reconstructed prompt to manifest.prompt byte-for-byte
-    ///
-    /// Returns true only if all chunks verify AND prompt matches reconstruction.
+    /// Mirrors rag-logic.hoon ++verify-manifest: verify each chunk proof
+    /// against the root, then reconstruct the prompt as
+    /// `query + "\n" + chunk0.dat + "\n" + chunk1.dat + ...` and compare
+    /// byte-for-byte. Returns true only if all chunks verify AND the
+    /// prompt matches the reconstruction.
     pub fn check_manifest(&self, manifest: &Manifest, root: &Tip5Hash) -> bool {
         self.validate_manifest(manifest, root).is_ok()
     }

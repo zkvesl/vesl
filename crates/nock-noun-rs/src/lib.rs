@@ -22,11 +22,11 @@
 //!
 //! # Memory Model
 //!
-//! NockStack is an arena allocator with two stacks growing toward each other.
-//! All noun allocations are bump-allocated on the current frame.
-//! We allocate a single stack at the start and pass `&mut stack` through
-//! every builder function. No frame push/pop needed for simple noun
-//! construction — build the entire noun tree in a single pass.
+//! NockStack is an arena allocator with two stacks growing toward each
+//! other; noun allocations are bump-allocated on the current frame.
+//! Allocate one stack up front and pass `&mut stack` through every
+//! builder. Simple noun construction needs no frame push/pop — build
+//! the whole tree in a single pass.
 //!
 //! # Nock Encoding Conventions
 //!
@@ -49,13 +49,12 @@ const STACK_SIZE: usize = 1 << 20;
 /// Safe wrapper around `NounSlab::root`.
 ///
 /// AUDIT 2026-04-17 H-06: centralizes the `unsafe { *slab.root() }`
-/// pattern that was copy-pasted across eight sites. The underlying
-/// `root()` call is `unsafe` because the returned `Noun` may contain
-/// raw pointers into the slab and must not outlive it. Copying the
-/// value out immediately is the established convention; this helper
-/// makes that convention the only supported entry point so a future
-/// contributor doesn't accidentally hold a `&Noun` past the slab
-/// drop.
+/// pattern that was copy-pasted across eight sites. `root()` is
+/// `unsafe` because the returned `Noun` may contain raw pointers into
+/// the slab and must not outlive it. Copying the value out immediately
+/// is the established convention; this helper makes it the only
+/// supported entry point so nobody accidentally holds a `&Noun` past
+/// the slab drop.
 ///
 /// ```ignore
 /// let slab = build_my_poke();          // must call set_root() internally
@@ -65,17 +64,14 @@ const STACK_SIZE: usize = 1 << 20;
 ///
 /// # Safety contract
 ///
-/// The caller must ensure `slab.set_root(..)` was called before this
-/// helper. A `NounSlab` with no root set has `root == D(0)` (the zero
-/// atom); the returned `Noun` is still memory-safe, but it's almost
-/// certainly a bug. Debug builds assert that the root is a cell for
-/// poke-building callers; disable with the caller-specific branch if
-/// atom-rooted slabs are valid for your use case.
+/// The caller must ensure `slab.set_root(..)` was called first. A
+/// `NounSlab` with no root set has `root == D(0)` (the zero atom); the
+/// returned `Noun` is still memory-safe, but it's almost certainly a
+/// bug.
 pub fn slab_root<J>(slab: &NounSlab<J>) -> Noun {
-    // SAFETY: we copy the Noun out immediately, never storing a
-    // reference that could outlive the slab. The Noun itself may
-    // contain raw pointers into the slab's arena; callers must use
-    // it before the slab is dropped.
+    // SAFETY: copied out immediately, never stored as a reference that
+    // could outlive the slab. The Noun may contain raw pointers into
+    // the slab's arena; use it before the slab is dropped.
     unsafe { *slab.root() }
 }
 
@@ -102,8 +98,8 @@ pub fn make_atom(stack: &mut NockStack, bytes: &[u8]) -> Noun {
     if bytes.is_empty() {
         return D(0);
     }
-    // SAFETY: bytes is a valid slice. new_raw_bytes_ref copies data into the
-    // NockStack allocator. normalize_as_atom produces a canonical atom representation.
+    // SAFETY: new_raw_bytes_ref copies the slice into the NockStack
+    // allocator; normalize_as_atom yields a canonical atom.
     unsafe {
         let mut indirect = IndirectAtom::new_raw_bytes_ref(stack, bytes);
         indirect.normalize_as_atom().as_noun()
@@ -130,8 +126,8 @@ pub fn make_tag(stack: &mut NockStack, s: &str) -> Noun {
 ///
 /// `true` (`%.y`) -> `D(0)`, `false` (`%.n`) -> `D(1)`.
 ///
-/// This is the opposite of C/Rust convention. Hoon uses `0` for
-/// true because it's "yes" / `%.y` — the first in the union.
+/// Inverted versus C/Rust: Hoon uses `0` for true because `%.y` is
+/// first in the union.
 pub fn make_loobean(b: bool) -> Noun {
     if b { D(0) } else { D(1) }
 }
@@ -169,24 +165,23 @@ pub fn cue_from_bytes(stack: &mut NockStack, bytes: &[u8]) -> Option<Noun> {
     cue(stack, a).ok()
 }
 
-/// Re-jam an atom whose bytes came from a cue-emitting graft (e.g.,
-/// `%queue-popped` body) so the same bytes can be fed to a
-/// cue-consuming graft (e.g., `%batch-add`) without round-trip
-/// double-cue corruption.
+/// Re-jam an atom whose bytes came from a cue-emitting graft (e.g.
+/// `%queue-popped` body) so they can be fed to a cue-consuming graft
+/// (e.g. `%batch-add`) without double-cue corruption.
 ///
 /// Cross-graft seam helper. State-grafts that store opaque payloads
 /// (queue, log, batch, registry) cue their input on entry and emit
 /// the resulting noun back unchanged. Walking that noun's bytes via
-/// `as_ne_bytes()` returns the *atom* representation, not a fresh
-/// jam encoding — feeding those bytes verbatim into another cue-
-/// consuming graft fails (or, on pathological back-refs, hangs the
-/// kernel inside `cue`). `rejam_atom` cues the bytes and re-jams the
-/// resulting noun so the next graft's `cue` succeeds.
+/// `as_ne_bytes()` returns the *atom* representation, not a fresh jam
+/// encoding — feeding those bytes verbatim into another cue-consuming
+/// graft fails (or, on pathological back-refs, hangs the kernel inside
+/// `cue`). `rejam_atom` cues the bytes and re-jams the result so the
+/// next graft's `cue` succeeds.
 ///
-/// Canonicalizes: input bytes and output bytes both encode the same
-/// noun, but they may not be byte-identical. Jam isn't a canonical
-/// encoding — different jammers may pick different back-ref
-/// schedules. The output is canonical under nockvm's jammer.
+/// Canonicalizing: input and output bytes encode the same noun but may
+/// not be byte-identical — jam isn't canonical, different jammers pick
+/// different back-ref schedules. The output is canonical under
+/// nockvm's jammer.
 ///
 /// Panics if `bytes` is not valid jam.
 pub fn rejam_atom(bytes: &[u8]) -> Vec<u8> {
@@ -211,8 +206,8 @@ pub fn make_atom_in(alloc: &mut impl NounAllocator, bytes: &[u8]) -> Noun {
     if bytes.is_empty() {
         return D(0);
     }
-    // SAFETY: bytes is a valid slice. new_raw_bytes_ref copies data into
-    // the allocator. normalize_as_atom produces a canonical atom representation.
+    // SAFETY: new_raw_bytes_ref copies the slice into the allocator;
+    // normalize_as_atom yields a canonical atom.
     unsafe {
         let mut indirect = IndirectAtom::new_raw_bytes_ref(alloc, bytes);
         indirect.normalize_as_atom().as_noun()

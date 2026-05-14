@@ -38,7 +38,7 @@ use vesl_wallet::{VeslWallet, WalletError, VESL_COIN_TYPE_PLACEHOLDER};
 use zeroize::Zeroize;
 
 // ---------------------------------------------------------------------------
-// Error type — preserves pre-shim API plus a BIP-39 mnemonic variant.
+// Error type — pre-shim API plus a BIP-39 mnemonic variant.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]

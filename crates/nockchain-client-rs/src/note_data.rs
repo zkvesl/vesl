@@ -36,18 +36,18 @@ use nockvm::noun::{IndirectAtom, Noun, D, T};
 
 /// Dereference a NounSlab's root noun (C-001 / AUDIT H-06).
 ///
-/// Centralized local helper so the `unsafe` block is in one place per
-/// crate. The caller must ensure `slab.set_root(..)` was called (or the
-/// slab was populated via `cue_into` / `NockApp::poke`, both of which
-/// set the root internally). The returned `Noun` may contain raw
+/// Centralized local helper so the `unsafe` block lives in one place
+/// per crate. The caller must ensure `slab.set_root(..)` was called —
+/// or the slab was populated via `cue_into` / `NockApp::poke`, both of
+/// which set the root internally. The returned `Noun` may contain raw
 /// pointers into the slab's arena and must not outlive it.
 ///
-/// This crate does not depend on `nock-noun-rs` to avoid a cycle with
-/// the rest of the vesl stack; the identical helper in nock-noun-rs
-/// is the canonical one for nock-noun-rs consumers.
+/// This crate doesn't depend on `nock-noun-rs` (avoids a cycle with
+/// the rest of the vesl stack); the identical helper there is the
+/// canonical one for nock-noun-rs consumers.
 fn slab_root(slab: &NounSlab) -> Noun {
     // SAFETY: copied out by value; never stored as `&Noun` past this
-    // function call. See the doc comment for the set_root contract.
+    // call. See the doc comment for the set_root contract.
     unsafe { *slab.root() }
 }
 

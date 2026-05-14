@@ -19,8 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut app: NockApp =
         boot::setup(&kernel, cli, &[], "data-registry", None).await?;
 
-    // Register data under name "doc-v1"
-    // The kernel hashes the data with SHA-256 and stores the hash
+    // Register data under name "doc-v1"; the kernel stores its SHA-256 hash.
     let mut slab = NounSlab::new();
     let poke = T(&mut slab, &[
         D(tas!(b"register")),

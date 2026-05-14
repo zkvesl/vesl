@@ -23,9 +23,9 @@ pub struct FieldWithProof {
 
 /// Encode a field as leaf bytes for Merkle hashing.
 ///
-/// The encoding is `"key:value"` as UTF-8 bytes. Simple, deterministic,
-/// and easy to reproduce in any language. Community developers change
-/// this for their domain's leaf encoding.
+/// Encoding is `"key:value"` as UTF-8 bytes — deterministic and easy
+/// to reproduce in any language. Community developers change this for
+/// their domain's leaf encoding.
 pub fn field_to_leaf_bytes(field: &Field) -> Vec<u8> {
     format!("{}:{}", field.key, field.value).into_bytes()
 }

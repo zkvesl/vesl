@@ -3,17 +3,15 @@
 //! batch-graft v0.1 is the settlement-flush buffer — accumulates
 //! caller-supplied intents and emits a single `%batch-flushed` effect
 //! when the configured count threshold trips. The downstream
-//! orchestrator (this Rust side or whoever owns the kernel) listens
-//! for the bundled flush and routes each intent into settle-graft on
-//! its own time.
+//! orchestrator listens for the bundled flush and routes each intent
+//! into settle-graft on its own time.
 //!
-//! v0.1 ships ONE trigger: `count`. The other two triggers from the
-//! 03 spec (`pages`, `time`) are deferred per
-//! `vesl-nockup/.dev/03_DEFERRALS.md`.
+//! v0.1 ships ONE trigger: `count`. The other two from the 03 spec
+//! (`pages`, `time`) are deferred per `vesl-nockup/.dev/03_DEFERRALS.md`.
 //!
 //! C1: `%batch-add` carries a jammed intent atom that the kernel
-//! re-cues inside its poke arm. Wrap is the canonical mule pattern
-//! from queue-graft / log-graft.
+//! re-cues inside its poke arm, wrapped in mule — the canonical
+//! pattern from queue-graft / log-graft.
 
 use nock_noun_rs::{
     atom_from_u64, jam_to_bytes, make_atom_in, make_tag_in, new_stack, slab_root, NounSlab,

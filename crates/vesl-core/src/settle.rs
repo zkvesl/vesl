@@ -158,9 +158,9 @@ impl<V: CommitmentVerifier> Settle<V> {
 
         let _poke: NounSlab = self.verifier.build_settle_poke(payload)?;
 
-        // The SDK builds the poke but does not dispatch it to the kernel.
-        // Kernel interaction requires a NockApp handle, which the hull owns.
-        // Use `poke_bytes()` to get the serialized poke for hull-side dispatch.
+        // Poke is built but not dispatched — kernel interaction needs a
+        // NockApp handle, which the hull owns. Use `poke_bytes()` to get
+        // the serialized poke for hull-side dispatch.
         self.settled_ids.insert(payload.note.id);
         Ok(Note {
             id: payload.note.id,

@@ -1,15 +1,15 @@
 //! End-to-end snapshot/resume round-trip.
 //!
 //! Boots a minimal kernel from `templates/counter/out.jam`, snapshots
-//! it, drops the app, and resumes from the snapshot. Asserts that
-//! resume completes without error — i.e., the state.jam written by
+//! it, drops the app, and resumes from the snapshot. Asserts resume
+//! completes without error — i.e., the state.jam written by
 //! `snapshot()` is loadable through `Cli::state_jam`.
 //!
-//! State-equivalence assertions (peek the same value pre/post
-//! resume) live in vesl-nockup-side tests, where the
-//! `compose_and_compile` machinery and graft-aware peek helpers
-//! ship. This upstream test is structural: it proves the bytes
-//! survive a round-trip and the API contract holds.
+//! State-equivalence assertions (peek the same value pre/post resume)
+//! live in vesl-nockup-side tests, where the `compose_and_compile`
+//! machinery and graft-aware peek helpers ship. This upstream test is
+//! structural: it proves the bytes survive a round-trip and the API
+//! contract holds.
 
 use std::path::PathBuf;
 
@@ -75,12 +75,11 @@ async fn snapshot_then_resume_round_trip() -> Result<()> {
     // with the snapshotted app's auto-save.
     drop(app);
 
-    // Resume — the import path in boot::setup should pick up
+    // Resume — boot::setup's import path should pick up
     // snapshot.state_jam() through cli.state_jam.
     let _resumed = resume(&kernel_path, &snap, "vesl-checkpoint-test-resumed").await?;
-    // No assertion on state contents — that's the vesl-nockup-side
-    // test's job. Resume returning Ok is the contract this upstream
-    // test asserts.
+    // Resume returning Ok is the contract this test asserts; state
+    // contents are the vesl-nockup-side test's job.
 
     Ok(())
 }

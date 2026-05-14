@@ -70,13 +70,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // --- step 4: verify proofs locally ---
     //
-    // The custom hash gate in the kernel does:
-    //   =((hash-leaf data) expected-root)
-    //
-    // From Rust, we use Mint proofs for local verification.
-    // The kernel gate is intentionally simpler — it doesn't
-    // need Merkle proofs because it hashes raw data directly.
-    // This is the point: your gate can be anything.
+    // The kernel's custom hash gate does `=((hash-leaf data) expected-root)`
+    // — no Merkle proof needed, it hashes raw data directly. Rust-side we use
+    // Mint proofs instead. The point: your gate can be anything.
 
     println!("\n=== step 4: local proof verification ===\n");
     for (i, intent) in intents.iter().enumerate() {

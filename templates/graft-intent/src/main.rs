@@ -11,10 +11,9 @@ use nockvm::noun::{D, T};
 /// graft-intent — family-5 placeholder driver.
 ///
 /// Pokes `%intent-declare` to prove the placeholder crashes loudly with
-/// `%intent-graft-placeholder`. A working intent coordination app will
-/// drop into this same shape once Nockchain upstream publishes the
-/// canonical intent structure; until then, this binary exists to
-/// demonstrate the reservation, not to do any work.
+/// `%intent-graft-placeholder`. A working intent coordination app drops into
+/// this same shape once Nockchain upstream publishes the canonical intent
+/// structure; until then this binary just demonstrates the reservation.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli = boot::default_boot_cli(false);

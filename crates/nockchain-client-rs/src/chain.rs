@@ -71,10 +71,11 @@ impl Default for ChainConfig {
 /// - Fetching block-explorer data for an existing tx
 pub struct ChainClient {
     client: nockapp_grpc::services::public_nockchain::PublicNockchainGrpcClient,
-    // Raw tonic client for the block-explorer service. The upstream
-    // `PublicNockchainGrpcClient` wraps `NockchainService` only; block-explorer
-    // RPCs (`get_transaction_block`, `get_transaction_details`) live on the
-    // separate `NockchainBlockService`. Drop this when the wrapper covers it.
+    // Raw tonic client for the block-explorer service. Upstream's
+    // `PublicNockchainGrpcClient` wraps `NockchainService` only;
+    // block-explorer RPCs (`get_transaction_block`,
+    // `get_transaction_details`) live on the separate
+    // `NockchainBlockService`. Drop this once the wrapper covers it.
     block: NockchainBlockServiceClient<Channel>,
     config: ChainConfig,
 }
@@ -206,9 +207,8 @@ impl ChainClient {
                 if status.code() == tonic::Code::NotFound
                     || status.code() == tonic::Code::InvalidArgument =>
             {
-                // The chain serves a malformed or unknown tx_id with the
-                // same meaning as far as the receipt is concerned: there
-                // is nothing to attest to. Surface both as `NotFound`.
+                // Malformed or unknown tx_id mean the same thing for a
+                // receipt: nothing to attest to. Surface both as `NotFound`.
                 return Ok(TransactionBlockResult::NotFound);
             }
             Err(status) => {
