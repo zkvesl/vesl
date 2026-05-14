@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Soft drift check across templates/graft-*/build.rs.
+# Soft drift check across templates/*/build.rs.
 #
 # graft-mint is the canonical (most-commented) build.rs. This script
-# diffs the emit_kernel_cause_tags() helper + its doc-block across
-# the four graft templates and reports any divergence.
+# auto-discovers every template whose build.rs defines
+# emit_kernel_cause_tags() and diffs the helper + its doc-block
+# against the canonical.
 #
 # Per-template cargo:rerun-if-changed lists legitimately differ (each
 # template imports its own subset of hoon/lib/*.hoon), so main()'s
@@ -11,8 +12,8 @@
 # job everywhere.
 #
 # Exit code is always 0 — this is informational. Run it after editing
-# any graft template's build.rs to confirm what kind of drift your
-# change introduces. CI can wire this in as a non-gating check.
+# any template's build.rs to confirm what kind of drift your change
+# introduces. CI can wire this in as a non-gating check.
 #
 # Companion to scripts/check-jam.sh.
 
@@ -23,11 +24,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 CANONICAL="templates/graft-mint/build.rs"
-SIBLINGS=(
-    "templates/graft-settle/build.rs"
-    "templates/graft-hash-gate/build.rs"
-    "templates/graft-intent/build.rs"
-)
+mapfile -t SIBLINGS < <(grep -l "^fn emit_kernel_cause_tags" templates/*/build.rs \
+    | grep -v "^${CANONICAL}\$" \
+    | sort)
 
 # Print everything from the docblock for emit_kernel_cause_tags (or
 # the fn signature if no doc block) through EOF. The helper sits at
@@ -74,7 +73,7 @@ if [[ "$clean" -eq 1 ]]; then
     echo "all template build.rs codegen helpers match canonical"
 else
     echo "Drift detected. Real fixes (cargo:warning wording, codegen failure"
-    echo "handling) should be reconciled across all four graft templates."
+    echo "handling) should be reconciled across all templates with the helper."
     echo ""
     echo "To reconcile: copy the canonical emit_kernel_cause_tags + docblock"
     echo "from $CANONICAL into each sibling listed above. Then re-run."
