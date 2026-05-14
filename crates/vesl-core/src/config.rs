@@ -275,88 +275,114 @@ impl SettlementConfig {
         let wallet_cfg = resolve_wallet(toml.wallet.as_ref(), overrides.account, seed_phrase);
 
         match mode {
-            SettlementMode::Local => Ok(Self {
-                mode: SettlementMode::Local,
-                chain_endpoint: None,
-                signing_key: None,
-                coinbase_timelock_min: 1,
-                tx_fee: 256,
-                auto_submit: false,
-                accept_timeout_secs: 0,
-                wallet: wallet_cfg,
-            }),
+            SettlementMode::Local => Ok(Self::resolve_local(wallet_cfg)),
+            SettlementMode::Fakenet => {
+                Ok(Self::resolve_fakenet(overrides, toml, default_signing_key, wallet_cfg))
+            }
+            SettlementMode::Dumbnet => Self::resolve_dumbnet(overrides, toml, wallet_cfg),
+        }
+    }
 
-            SettlementMode::Fakenet => Ok(Self {
-                mode: SettlementMode::Fakenet,
-                chain_endpoint: Some(
-                    overrides
-                        .chain_endpoint
-                        .clone()
-                        .or_else(|| toml.chain_endpoint.clone())
-                        .unwrap_or_else(|| "http://localhost:9090".into()),
-                ),
-                signing_key: default_signing_key,
-                coinbase_timelock_min: overrides
-                    .coinbase_timelock_min
-                    .or(toml.coinbase_timelock_min)
-                    .unwrap_or(1),
-                tx_fee: overrides.tx_fee.or(toml.tx_fee).unwrap_or(256),
-                auto_submit: true,
-                accept_timeout_secs: overrides
-                    .accept_timeout
-                    .or(toml.accept_timeout_secs)
-                    .unwrap_or(300),
-                wallet: wallet_cfg,
-            }),
+    /// Local mode — zero chain, zero signing key, mode defaults only.
+    fn resolve_local(wallet_cfg: Option<WalletConfig>) -> Self {
+        Self {
+            mode: SettlementMode::Local,
+            chain_endpoint: None,
+            signing_key: None,
+            coinbase_timelock_min: 1,
+            tx_fee: 256,
+            auto_submit: false,
+            accept_timeout_secs: 0,
+            wallet: wallet_cfg,
+        }
+    }
 
-            SettlementMode::Dumbnet => {
-                let endpoint = overrides
+    /// Fakenet mode — endpoint falls back to localhost, signing key is
+    /// the caller-supplied deterministic key. Infallible: every field
+    /// has a default.
+    fn resolve_fakenet(
+        overrides: &SettlementCliOverrides,
+        toml: &SettlementToml,
+        default_signing_key: Option<[Belt; 8]>,
+        wallet_cfg: Option<WalletConfig>,
+    ) -> Self {
+        Self {
+            mode: SettlementMode::Fakenet,
+            chain_endpoint: Some(
+                overrides
                     .chain_endpoint
                     .clone()
                     .or_else(|| toml.chain_endpoint.clone())
-                    .ok_or_else(|| {
-                        "dumbnet mode requires --chain-endpoint or \
-                         chain_endpoint in config"
-                            .to_string()
-                    })?;
-
-                // Derive the legacy [Belt; 8] signing_key at the
-                // resolved wallet's intent role/index. New consumers
-                // should use the `intent_signer_belts` /
-                // `payment_signer_belts` helpers below instead.
-                let sk = match wallet_cfg.as_ref() {
-                    Some(w) => match w.seed_phrase.as_deref() {
-                        None => None,
-                        Some(phrase) => {
-                            let wallet = VeslWallet::from_seed_phrase(phrase, "", w.coin_type)
-                                .map_err(|e| format!("invalid seed phrase: {e:?}"))?;
-                            let key = wallet
-                                .intent_signer(w.account, w.intent.index)
-                                .map_err(|e| format!("intent_signer derivation failed: {e:?}"))?;
-                            Some(intent_key_to_belts8(&key))
-                        }
-                    },
-                    None => None,
-                };
-
-                Ok(Self {
-                    mode: SettlementMode::Dumbnet,
-                    chain_endpoint: Some(endpoint),
-                    signing_key: sk,
-                    coinbase_timelock_min: overrides
-                        .coinbase_timelock_min
-                        .or(toml.coinbase_timelock_min)
-                        .unwrap_or(1),
-                    tx_fee: overrides.tx_fee.or(toml.tx_fee).unwrap_or(256),
-                    auto_submit: true,
-                    accept_timeout_secs: overrides
-                        .accept_timeout
-                        .or(toml.accept_timeout_secs)
-                        .unwrap_or(900),
-                    wallet: wallet_cfg,
-                })
-            }
+                    .unwrap_or_else(|| "http://localhost:9090".into()),
+            ),
+            signing_key: default_signing_key,
+            coinbase_timelock_min: overrides
+                .coinbase_timelock_min
+                .or(toml.coinbase_timelock_min)
+                .unwrap_or(1),
+            tx_fee: overrides.tx_fee.or(toml.tx_fee).unwrap_or(256),
+            auto_submit: true,
+            accept_timeout_secs: overrides
+                .accept_timeout
+                .or(toml.accept_timeout_secs)
+                .unwrap_or(300),
+            wallet: wallet_cfg,
         }
+    }
+
+    /// Dumbnet mode — the one fallible resolver: a chain endpoint is
+    /// required (no localhost default), and signing-key derivation can
+    /// fail on a bad seed phrase.
+    fn resolve_dumbnet(
+        overrides: &SettlementCliOverrides,
+        toml: &SettlementToml,
+        wallet_cfg: Option<WalletConfig>,
+    ) -> Result<Self, String> {
+        let endpoint = overrides
+            .chain_endpoint
+            .clone()
+            .or_else(|| toml.chain_endpoint.clone())
+            .ok_or_else(|| {
+                "dumbnet mode requires --chain-endpoint or \
+                 chain_endpoint in config"
+                    .to_string()
+            })?;
+
+        // Derive the legacy [Belt; 8] signing_key at the resolved
+        // wallet's intent role/index. New consumers should use the
+        // `intent_signer_belts` / `payment_signer_belts` helpers below
+        // instead.
+        let sk = match wallet_cfg.as_ref() {
+            Some(w) => match w.seed_phrase.as_deref() {
+                None => None,
+                Some(phrase) => {
+                    let wallet = VeslWallet::from_seed_phrase(phrase, "", w.coin_type)
+                        .map_err(|e| format!("invalid seed phrase: {e:?}"))?;
+                    let key = wallet
+                        .intent_signer(w.account, w.intent.index)
+                        .map_err(|e| format!("intent_signer derivation failed: {e:?}"))?;
+                    Some(intent_key_to_belts8(&key))
+                }
+            },
+            None => None,
+        };
+
+        Ok(Self {
+            mode: SettlementMode::Dumbnet,
+            chain_endpoint: Some(endpoint),
+            signing_key: sk,
+            coinbase_timelock_min: overrides
+                .coinbase_timelock_min
+                .or(toml.coinbase_timelock_min)
+                .unwrap_or(1),
+            tx_fee: overrides.tx_fee.or(toml.tx_fee).unwrap_or(256),
+            auto_submit: true,
+            accept_timeout_secs: overrides
+                .accept_timeout
+                .or(toml.accept_timeout_secs)
+                .unwrap_or(900),
+            wallet: wallet_cfg,
+        })
     }
 
     /// True if this config has everything needed for on-chain submission.
