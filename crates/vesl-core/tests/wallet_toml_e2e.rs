@@ -15,6 +15,7 @@ use vesl_core::config::{
     SettlementCliOverrides, SettlementConfig, SettlementMode, SettlementToml, WalletRoleToml,
     WalletToml,
 };
+use vesl_core::SigningError;
 use vesl_signing::prelude::Belt as VeslBelt;
 use vesl_signing::schnorr::{schnorr_sign, schnorr_verify, SchnorrPrivateKey};
 
@@ -60,12 +61,10 @@ fn nested_toml_drives_intent_and_payment_to_distinct_keys() {
 
     let intent_belts = cfg
         .intent_signer_belts()
-        .expect("intent derivation succeeds")
-        .expect("intent key present");
+        .expect("intent derivation succeeds");
     let payment_belts = cfg
         .payment_signer_belts()
-        .expect("payment derivation succeeds")
-        .expect("payment key present");
+        .expect("payment derivation succeeds");
 
     assert_ne!(
         intent_belts, payment_belts,
@@ -90,16 +89,8 @@ fn same_code_signs_under_intent_and_payment_keys_via_toml_toggle() {
     )
     .unwrap();
 
-    let intent_key = key_from_belts(
-        &cfg.intent_signer_belts()
-            .unwrap()
-            .expect("intent key present"),
-    );
-    let payment_key = key_from_belts(
-        &cfg.payment_signer_belts()
-            .unwrap()
-            .expect("payment key present"),
-    );
+    let intent_key = key_from_belts(&cfg.intent_signer_belts().expect("intent key present"));
+    let payment_key = key_from_belts(&cfg.payment_signer_belts().expect("payment key present"));
 
     let intent_msg = [
         VeslBelt(11),
@@ -169,8 +160,8 @@ fn wallet_toml_indices_round_trip_into_signing_keys() {
     )
     .unwrap();
 
-    let key_a = cfg_a.intent_signer_belts().unwrap().unwrap();
-    let key_b = cfg_b.intent_signer_belts().unwrap().unwrap();
+    let key_a = cfg_a.intent_signer_belts().unwrap();
+    let key_b = cfg_b.intent_signer_belts().unwrap();
     assert_ne!(
         key_a, key_b,
         "different `intent.index` must derive different scalars"
@@ -203,8 +194,8 @@ fn cli_account_override_propagates_to_derived_key() {
     )
     .unwrap();
 
-    let k0 = cfg_default_account.intent_signer_belts().unwrap().unwrap();
-    let k5 = cfg_overridden.intent_signer_belts().unwrap().unwrap();
+    let k0 = cfg_default_account.intent_signer_belts().unwrap();
+    let k5 = cfg_overridden.intent_signer_belts().unwrap();
     assert_ne!(
         k0, k5,
         "CLI account override must produce a different derived key"
@@ -221,6 +212,12 @@ fn missing_wallet_block_yields_no_signing_keys() {
     )
     .unwrap();
     assert!(cfg.wallet.is_none());
-    assert!(cfg.intent_signer_belts().unwrap().is_none());
-    assert!(cfg.payment_signer_belts().unwrap().is_none());
+    assert!(matches!(
+        cfg.intent_signer_belts(),
+        Err(SigningError::NoSeedPhrase)
+    ));
+    assert!(matches!(
+        cfg.payment_signer_belts(),
+        Err(SigningError::NoSeedPhrase)
+    ));
 }

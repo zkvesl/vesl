@@ -56,6 +56,11 @@ pub enum SigningError {
     /// produces a scalar outside `(0, G_ORDER)`. Cryptographically
     /// negligible with Tip5 but typed for completeness.
     DerivationFailure(String),
+    /// Returned by the config per-role signer helpers
+    /// (`SettlementConfig::intent_signer_belts` / `payment_signer_belts`)
+    /// when no wallet seed phrase is configured — either no `[wallet]`
+    /// block at all, or a `[wallet]` block without a `seed_phrase`.
+    NoSeedPhrase,
 }
 
 impl fmt::Display for SigningError {
@@ -67,6 +72,7 @@ impl fmt::Display for SigningError {
             Self::ZeroSignature => write!(f, "signature was zero"),
             Self::InvalidMnemonic(msg) => write!(f, "invalid BIP-39 mnemonic: {msg}"),
             Self::DerivationFailure(msg) => write!(f, "BIP-44 derivation failed: {msg}"),
+            Self::NoSeedPhrase => write!(f, "no wallet seed phrase configured"),
         }
     }
 }

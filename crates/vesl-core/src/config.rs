@@ -404,30 +404,33 @@ impl SettlementConfig {
 
     /// Return the per-role intent signer as a legacy `[Belt; 8]`. The
     /// TOML config-toggle pattern: an intent app calls this. Returns
-    /// `Ok(None)` when no wallet seed phrase is configured.
-    pub fn intent_signer_belts(&self) -> Result<Option<[Belt; 8]>, signing::SigningError> {
+    /// `Err(SigningError::NoSeedPhrase)` when no wallet seed phrase is
+    /// configured — callers that treat that as "not an error" can
+    /// `.ok()`-discard.
+    pub fn intent_signer_belts(&self) -> Result<[Belt; 8], signing::SigningError> {
         self.derive_role_belts(|w| (w.intent.role, w.intent.index))
     }
 
     /// Return the per-role payment signer as a legacy `[Belt; 8]`. The
     /// TOML config-toggle pattern: a payment app calls this. Returns
-    /// `Ok(None)` when no wallet seed phrase is configured.
-    pub fn payment_signer_belts(&self) -> Result<Option<[Belt; 8]>, signing::SigningError> {
+    /// `Err(SigningError::NoSeedPhrase)` when no wallet seed phrase is
+    /// configured — callers that treat that as "not an error" can
+    /// `.ok()`-discard.
+    pub fn payment_signer_belts(&self) -> Result<[Belt; 8], signing::SigningError> {
         self.derive_role_belts(|w| (w.payment.role, w.payment.index))
     }
 
-    fn derive_role_belts<F>(&self, pick: F) -> Result<Option<[Belt; 8]>, signing::SigningError>
+    fn derive_role_belts<F>(&self, pick: F) -> Result<[Belt; 8], signing::SigningError>
     where
         F: FnOnce(&WalletConfig) -> (u32, u32),
     {
-        let wallet_cfg = match self.wallet.as_ref() {
-            None => return Ok(None),
-            Some(w) => w,
-        };
-        let wallet = match wallet_cfg.build_wallet()? {
-            None => return Ok(None),
-            Some(w) => w,
-        };
+        let wallet_cfg = self
+            .wallet
+            .as_ref()
+            .ok_or(signing::SigningError::NoSeedPhrase)?;
+        let wallet = wallet_cfg
+            .build_wallet()?
+            .ok_or(signing::SigningError::NoSeedPhrase)?;
         let (role, index) = pick(wallet_cfg);
         let path = vesl_wallet::DerivationPath::new(
             wallet_cfg.coin_type,
@@ -436,7 +439,7 @@ impl SettlementConfig {
             index,
         );
         let derived = wallet.derive(path).map_err(signing::SigningError::from)?;
-        Ok(Some(intent_key_to_belts8(&derived.private_key)))
+        Ok(intent_key_to_belts8(&derived.private_key))
     }
 }
 
@@ -805,8 +808,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let intent = cfg.intent_signer_belts().unwrap().expect("intent key");
-        let payment = cfg.payment_signer_belts().unwrap().expect("payment key");
+        let intent = cfg.intent_signer_belts().expect("intent key");
+        let payment = cfg.payment_signer_belts().expect("payment key");
         assert_ne!(intent, payment);
     }
 }
