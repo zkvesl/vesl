@@ -11,6 +11,7 @@ out.jam
 
 # Runtime state
 hull/.data.vesl/
+.data.*/
 *.pid
 .fakenet/
 
