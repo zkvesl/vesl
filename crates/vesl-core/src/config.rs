@@ -352,17 +352,8 @@ impl SettlementConfig {
         // `intent_signer_belts` / `payment_signer_belts` helpers below
         // instead.
         let sk = match wallet_cfg.as_ref() {
-            Some(w) => match w.seed_phrase.as_deref() {
-                None => None,
-                Some(phrase) => {
-                    let wallet = VeslWallet::from_seed_phrase(phrase, "", w.coin_type)
-                        .map_err(|e| format!("invalid seed phrase: {e:?}"))?;
-                    let key = wallet
-                        .intent_signer(w.account, w.intent.index)
-                        .map_err(|e| format!("intent_signer derivation failed: {e:?}"))?;
-                    Some(intent_key_to_belts8(&key))
-                }
-            },
+            Some(w) => wallet_role_belts(w, w.intent.role, w.intent.index)
+                .map_err(|e| format!("intent derivation failed: {e}"))?,
             None => None,
         };
 
@@ -427,19 +418,30 @@ impl SettlementConfig {
             .wallet
             .as_ref()
             .ok_or(signing::SigningError::NoSeedPhrase)?;
-        let wallet = wallet_cfg
-            .build_wallet()?
-            .ok_or(signing::SigningError::NoSeedPhrase)?;
         let (role, index) = pick(wallet_cfg);
-        let path = vesl_wallet::DerivationPath::new(
-            wallet_cfg.coin_type,
-            wallet_cfg.account,
-            role,
-            index,
-        );
-        let derived = wallet.derive(path).map_err(signing::SigningError::from)?;
-        Ok(intent_key_to_belts8(&derived.private_key))
+        wallet_role_belts(wallet_cfg, role, index)?
+            .ok_or(signing::SigningError::NoSeedPhrase)
     }
+}
+
+/// Derive the legacy `[Belt; 8]` signing key at a given role/index from
+/// a resolved [`WalletConfig`]. Returns `Ok(None)` when no seed phrase
+/// is configured (resolve-time happy path); `Err` only on a genuine
+/// derivation failure. Shared by `resolve_dumbnet` (pre-construction)
+/// and `derive_role_belts` (post-construction). Single canonical
+/// derivation site so the two paths can't diverge.
+fn wallet_role_belts(
+    cfg: &WalletConfig,
+    role: u32,
+    index: u32,
+) -> Result<Option<[Belt; 8]>, signing::SigningError> {
+    let wallet = match cfg.build_wallet()? {
+        None => return Ok(None),
+        Some(w) => w,
+    };
+    let path = vesl_wallet::DerivationPath::new(cfg.coin_type, cfg.account, role, index);
+    let derived = wallet.derive(path).map_err(signing::SigningError::from)?;
+    Ok(Some(intent_key_to_belts8(&derived.private_key)))
 }
 
 impl fmt::Display for SettlementConfig {
