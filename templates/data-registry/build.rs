@@ -76,7 +76,5 @@ fn emit_kernel_cause_tags(out_dir: &str, hoon_app_file: &str) {
             e
         ),
     }
-    // Keeps the `fs` import live for future codegen targets that write
-    // structured output here; suppresses the unused-import warning meanwhile.
     let _ = fs::metadata(out_dir);
 }

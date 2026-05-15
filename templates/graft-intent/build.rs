@@ -48,6 +48,11 @@ fn main() {
     }
 }
 
+/// Drift-detection codegen: emit `kernel_cause_tags.rs` so drivers can
+/// `include!` the slice + `assert_kernel_cause_tag!` macro, letting cargo
+/// build catch driver/kernel cause-tag drift. Failures are warnings —
+/// drivers can opt out by gating the macro on `cfg(any())` or skipping the
+/// include — so the build still succeeds when graft-inject isn't installed.
 fn emit_kernel_cause_tags(out_dir: &str, hoon_app_file: &str) {
     let cause_tags_out = format!("{}/kernel_cause_tags.rs", out_dir);
     let result = Command::new("graft-inject")
@@ -71,8 +76,10 @@ fn emit_kernel_cause_tags(out_dir: &str, hoon_app_file: &str) {
             String::from_utf8_lossy(&r.stderr)
         ),
         Err(e) => println!(
-            "cargo:warning=Could not run graft-inject: {}. Skipping cause-tag codegen.",
+            "cargo:warning=Could not run graft-inject: {}. Skipping cause-tag codegen — \
+             driver `assert_kernel_cause_tag!` invocations will fail to expand.",
             e
         ),
     }
+    let _ = fs::metadata(out_dir);
 }
