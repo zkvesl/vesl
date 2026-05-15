@@ -21,7 +21,8 @@ use tokio::sync::Mutex;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use vesl_core::{
-    fetch_receipt, format_tip5, ChainClient, MerkleTree, SettlementMode, TxReceipt, VerifyTxError,
+    fetch_receipt, format_tip5, ChainClient, MerkleTree, NounSlab, SettlementMode, TxReceipt,
+    VerifyTxError,
 };
 
 use crate::config::SettlementConfig;
@@ -272,6 +273,46 @@ pub fn router(state: SharedState) -> Router {
 }
 
 // ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Poke the kernel with a 30s timeout, mapping the two failure modes to
+/// HTTP error tuples. `log_prefix` names the poke for stderr logging
+/// (e.g., "register", "settle"). Returns the effects list on success.
+async fn poke_kernel_with_timeout(
+    app: &mut NockApp,
+    poke: NounSlab,
+    log_prefix: &str,
+) -> Result<Vec<NounSlab>, (StatusCode, Json<ErrorBody>)> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        app.poke(SystemWire.to_wire(), poke),
+    )
+    .await
+    {
+        Err(_) => {
+            eprintln!("kernel {log_prefix} poke timed out");
+            Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(ErrorBody {
+                    error: "kernel operation timed out".into(),
+                }),
+            ))
+        }
+        Ok(Err(e)) => {
+            eprintln!("kernel {log_prefix} poke failed: {e}");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorBody {
+                    error: "internal error".into(),
+                }),
+            ))
+        }
+        Ok(Ok(effects)) => Ok(effects),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -347,29 +388,7 @@ async fn commit_handler(
     // Register root with kernel
     let mut st = state.lock().await;
     let register_poke = vesl_core::noun_builder::build_register_poke(st.hull_id, &root);
-    let _effects = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        st.app.poke(SystemWire.to_wire(), register_poke),
-    )
-    .await
-    .map_err(|_| {
-        eprintln!("kernel register poke timed out");
-        (
-            StatusCode::GATEWAY_TIMEOUT,
-            Json(ErrorBody {
-                error: "kernel operation timed out".into(),
-            }),
-        )
-    })?
-    .map_err(|e| {
-        eprintln!("kernel register poke failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorBody {
-                error: "internal error".into(),
-            }),
-        )
-    })?;
+    let _effects = poke_kernel_with_timeout(&mut st.app, register_poke, "register").await?;
 
     st.fields = req.fields;
     st.tree = Some(tree);
@@ -407,28 +426,7 @@ async fn settle_handler(
 
     // Register is the settlement primitive for the generic hull
     let settle_poke = vesl_core::noun_builder::build_register_poke(st.hull_id, &root);
-    let effects = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        st.app.poke(SystemWire.to_wire(), settle_poke),
-    )
-    .await
-    .map_err(|_| {
-        (
-            StatusCode::GATEWAY_TIMEOUT,
-            Json(ErrorBody {
-                error: "kernel operation timed out".into(),
-            }),
-        )
-    })?
-    .map_err(|e| {
-        eprintln!("kernel settle poke failed: {e}");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorBody {
-                error: "internal error".into(),
-            }),
-        )
-    })?;
+    let effects = poke_kernel_with_timeout(&mut st.app, settle_poke, "settle").await?;
 
     Ok(Json(SettleResponse {
         note_id,
