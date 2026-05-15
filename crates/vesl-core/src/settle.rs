@@ -331,21 +331,7 @@ pub fn build_settle_poke(
     manifest: &Manifest,
     expected_root: &Tip5Hash,
 ) -> NounSlab {
-    use nock_noun_rs::*;
-
-    let mut slab = NounSlab::new();
-
-    let tag = make_tag_in(&mut slab, "settle");
-    let payload = build_settlement_payload_in(&mut slab, note, manifest, expected_root);
-    let payload_bytes = {
-        let mut stack = new_stack();
-        jam_to_bytes(&mut stack, payload)
-    };
-    let jammed = make_atom_in(&mut slab, &payload_bytes);
-
-    let poke = nockvm::noun::T(&mut slab, &[tag, jammed]);
-    slab.set_root(poke);
-    slab
+    build_settlement_poke_with_verb("settle", note, manifest, expected_root)
 }
 
 /// Build a [%prove jammed-payload] poke in NounSlab.
@@ -356,11 +342,23 @@ pub fn build_prove_poke(
     manifest: &Manifest,
     expected_root: &Tip5Hash,
 ) -> NounSlab {
+    build_settlement_poke_with_verb("prove", note, manifest, expected_root)
+}
+
+/// Build a [%<verb> jammed-payload] poke for the RAG settlement
+/// payload. Shared by `build_settle_poke` and `build_prove_poke` —
+/// payload assembly + jam canonicalization are identical; only the
+/// cause tag differs.
+fn build_settlement_poke_with_verb(
+    verb: &str,
+    note: &Note,
+    manifest: &Manifest,
+    expected_root: &Tip5Hash,
+) -> NounSlab {
     use nock_noun_rs::*;
 
     let mut slab = NounSlab::new();
-
-    let tag = make_tag_in(&mut slab, "prove");
+    let tag = make_tag_in(&mut slab, verb);
     let payload = build_settlement_payload_in(&mut slab, note, manifest, expected_root);
     let payload_bytes = {
         let mut stack = new_stack();
