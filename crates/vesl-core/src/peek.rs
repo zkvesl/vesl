@@ -90,12 +90,7 @@ pub fn build_keyless_peek_path(tag: &str) -> NounSlab {
 /// shape) silently return `None` rather than surfacing an error.
 /// If your driver needs strict decode failure, walk the noun yourself.
 pub fn unwrap_triple_unit_atom(result: &NounSlab) -> Option<Vec<u8>> {
-    // SAFETY: copy the Noun out immediately; the slab outlives this scope.
-    let noun = unsafe { *result.root() };
-
-    let outer = noun.as_cell().ok()?;
-    let inner_cell = outer.tail().as_cell().ok()?;
-    let maybe_value = inner_cell.tail();
+    let maybe_value = strip_triple_unit_envelope(result)?;
 
     if let Ok(atom) = maybe_value.as_atom() {
         let bytes = atom.as_ne_bytes();
@@ -122,11 +117,7 @@ pub fn unwrap_triple_unit_atom(result: &NounSlab) -> Option<Vec<u8>> {
 /// the graft contract returns `(unit ?)` — the latter conflates
 /// atom-0 (true) with the absent case, which is wrong for loobeans.
 pub fn peek_loobean(result: &NounSlab) -> Option<bool> {
-    let noun = unsafe { *result.root() };
-
-    let outer = noun.as_cell().ok()?;
-    let inner_cell = outer.tail().as_cell().ok()?;
-    let maybe_value = inner_cell.tail();
+    let maybe_value = strip_triple_unit_envelope(result)?;
 
     // Inner ~ → no loobean produced for this key.
     let value_cell = maybe_value.as_cell().ok()?;
@@ -197,12 +188,7 @@ pub fn peek_unit_list<T>(
     result: &NounSlab,
     decode: impl Fn(Noun) -> Option<T>,
 ) -> Option<Vec<T>> {
-    // SAFETY: copy the Noun out immediately; the slab outlives this scope.
-    let noun = unsafe { *result.root() };
-
-    let outer = noun.as_cell().ok()?;
-    let inner_cell = outer.tail().as_cell().ok()?;
-    let maybe_value = inner_cell.tail();
+    let maybe_value = strip_triple_unit_envelope(result)?;
 
     // Inner unit is bare `~` → no value at the path; return empty vec.
     if let Ok(atom) = maybe_value.as_atom() {
@@ -315,6 +301,19 @@ pub fn decode_queue_popped(effects: &[NounSlab]) -> Option<(u64, Vec<u8>)> {
 fn trim_trailing_zeros(bytes: &[u8]) -> &[u8] {
     let len = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
     &bytes[..len]
+}
+
+/// Strip the `[~ [~ value]]` envelope every v0.1 graft peek wraps its
+/// payload in. Returns the inner `value` noun (atom or cell), or `None`
+/// when the envelope is malformed.
+///
+/// SAFETY: copies the Noun out of the slab immediately; the slab
+/// outlives every caller of this function.
+fn strip_triple_unit_envelope(result: &NounSlab) -> Option<Noun> {
+    let noun = unsafe { *result.root() };
+    let outer = noun.as_cell().ok()?;
+    let inner_cell = outer.tail().as_cell().ok()?;
+    Some(inner_cell.tail())
 }
 
 #[cfg(test)]
