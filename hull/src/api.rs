@@ -21,8 +21,8 @@ use tokio::sync::Mutex;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use vesl_core::{
-    fetch_receipt, format_tip5, ChainClient, MerkleTree, NounSlab, SettlementMode, TxReceipt,
-    VerifyTxError,
+    effect_head_tag, fetch_receipt, format_tip5, ChainClient, MerkleTree, NounSlab,
+    SettlementMode, TxReceipt, VerifyTxError,
 };
 
 use crate::config::SettlementConfig;
@@ -336,6 +336,13 @@ async fn status(State(state): State<SharedState>) -> Json<StatusResponse> {
 }
 
 /// POST /commit — accept fields, build Merkle tree, register root.
+///
+/// Returns 409 Conflict if the settle kernel has already registered a
+/// root for this hull_id — the `%register` cause is single-shot per
+/// process, so subsequent commits would silently desync local state
+/// from kernel state (audit §2.C-01). Returns 502 Bad Gateway if the
+/// kernel emits an unexpected first-effect tag. See
+/// `docs/AUDIT_C01_FOLLOWUP.md` for the deferred rotate-root work.
 async fn commit_handler(
     State(state): State<SharedState>,
     Json(req): Json<CommitRequest>,
@@ -388,7 +395,29 @@ async fn commit_handler(
     // Register root with kernel
     let mut st = state.lock().await;
     let register_poke = vesl_core::noun_builder::build_register_poke(st.hull_id, &root);
-    let _effects = poke_kernel_with_timeout(&mut st.app, register_poke, "register").await?;
+    let effects = poke_kernel_with_timeout(&mut st.app, register_poke, "register").await?;
+
+    // Audit §2.C-01: empty effects = kernel rejected the %register
+    // (handle-register returns ~ on duplicate hull). Refuse silently
+    // overwriting local state with a root the kernel has not attested.
+    if effects.is_empty() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorBody {
+                error: "hull root already registered; this hull is single-shot per process \
+                        (see docs/AUDIT_C01_FOLLOWUP.md)"
+                    .into(),
+            }),
+        ));
+    }
+    if effect_head_tag(&effects[0]).as_deref() != Some("registered") {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorBody {
+                error: "unexpected kernel effect tag from %register poke".into(),
+            }),
+        ));
+    }
 
     st.fields = req.fields;
     st.tree = Some(tree);
