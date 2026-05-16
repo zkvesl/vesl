@@ -35,6 +35,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn poke(app: &mut NockApp, slab: NounSlab) -> Result<(), Box<dyn Error>> {
     let effects = app.poke(SystemWire.to_wire(), slab).await?;
+    if effects.is_empty() {
+        return Err("kernel returned no effects (likely duplicate hull \
+                    registration or replay; see settle kernel slog)"
+            .into());
+    }
     for tag in vesl_core::effect_head_tags(&effects) {
         println!("  effect: %{tag}");
     }
