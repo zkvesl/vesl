@@ -430,6 +430,14 @@ async fn commit_handler(
 }
 
 /// POST /settle — settle a note against the current Merkle root.
+///
+/// Today this endpoint re-pokes the kernel's `%register` cause (the
+/// generic hull does not yet construct a full settlement-payload);
+/// see `docs/AUDIT_C01_FOLLOWUP.md` for the real-%settle plumbing
+/// work. Same 409 / 502 contract as `/commit`: returns 409 Conflict
+/// when the kernel rejected the duplicate registration, 502 Bad
+/// Gateway on unexpected effect tag (audit §2.C-01). The note
+/// counter is only advanced after the kernel accepts.
 async fn settle_handler(
     State(state): State<SharedState>,
     Json(req): Json<SettleRequest>,
@@ -448,14 +456,36 @@ async fn settle_handler(
     let root = tree.root();
     let root_hex = format_tip5(&root);
 
-    // Increment note counter
-    st.note_counter += 1;
-    let note_id = req.note_id.unwrap_or(st.note_counter);
-    save_note_counter(&st.output_dir, st.note_counter);
-
     // Register is the settlement primitive for the generic hull
     let settle_poke = vesl_core::noun_builder::build_register_poke(st.hull_id, &root);
     let effects = poke_kernel_with_timeout(&mut st.app, settle_poke, "settle").await?;
+
+    // Audit §2.C-01: gate counter advancement and HTTP success on
+    // the kernel actually accepting the poke. Pre-fix the counter
+    // advanced even when handle-register returned ~ on duplicate.
+    if effects.is_empty() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorBody {
+                error: "hull root already registered; /settle currently re-uses the \
+                        %register cause and is single-shot per process \
+                        (see docs/AUDIT_C01_FOLLOWUP.md)"
+                    .into(),
+            }),
+        ));
+    }
+    if effect_head_tag(&effects[0]).as_deref() != Some("registered") {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorBody {
+                error: "unexpected kernel effect tag from %register poke".into(),
+            }),
+        ));
+    }
+
+    st.note_counter += 1;
+    let note_id = req.note_id.unwrap_or(st.note_counter);
+    save_note_counter(&st.output_dir, st.note_counter);
 
     Ok(Json(SettleResponse {
         note_id,
