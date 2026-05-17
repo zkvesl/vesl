@@ -20,5 +20,6 @@ nock-noun-rs = { path = "../../crates/nock-noun-rs" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
-vesl-test = { git = "https://github.com/zkvesl/vesl-nockup" }
-anyhow    = "1.0"
+vesl-test       = { git = "https://github.com/zkvesl/vesl-nockup" }
+vesl-checkpoint = { git = "https://github.com/zkvesl/vesl-nockup" }
+anyhow          = "1.0"
