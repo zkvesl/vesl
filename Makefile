@@ -3,7 +3,7 @@
 # Quick start:
 #   cp vesl.toml.example vesl.toml   (edit nock_home if needed)
 #   make setup                        (create hoon symlinks)
-#   make build                        (compile hull)
+#   make build                        (compile the workspace)
 
 .PHONY: help setup build test test-unit clean
 
@@ -93,5 +93,5 @@ test-unit: check-cargo
 
 clean:
 	cargo clean 2>/dev/null || true
-	rm -rf hull/.data.vesl/ out.jam
+	rm -rf out.jam
 	@echo "Clean."

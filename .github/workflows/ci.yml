@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# NOTE: hull and vesl-core depend on the nockchain monorepo at ../../nockchain.
+# NOTE: vesl-core depends on the nockchain monorepo at ../../nockchain.
 # Full CI requires either:
 #   (a) a checkout step that clones nockchain to the expected relative path, or
 #   (b) publishing nockchain crates to a registry.
@@ -22,9 +22,6 @@ jobs:
       - name: Run tests (vesl-core)
         run: cargo test -p vesl-core
         working-directory: crates/vesl-core
-      - name: Run tests (hull, including JAM alignment)
-        run: cargo test --lib
-        working-directory: hull
 
   audit:
     runs-on: ubuntu-latest
@@ -36,9 +33,6 @@ jobs:
       - name: Audit dependencies (vesl-core)
         run: cargo audit
         working-directory: crates/vesl-core
-      - name: Audit dependencies (hull)
-        run: cargo audit
-        working-directory: hull
 
   clippy:
     runs-on: ubuntu-latest
@@ -51,6 +45,3 @@ jobs:
       - name: Clippy (vesl-core)
         run: cargo clippy -p vesl-core -- -D warnings
         working-directory: crates/vesl-core
-      - name: Clippy (hull)
-        run: cargo clippy --lib -- -D warnings
-        working-directory: hull
