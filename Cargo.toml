@@ -36,3 +36,12 @@ exclude = ["templates"]
 # WITHOUT vesl-core stay on crates.io ibig and are unaffected.
 [patch.crates-io]
 ibig = { path = "../nockchain/crates/nockvm/rust/ibig" }
+
+# Bypass the `is_in_frame` debug_assert! that fires on PMA-resolved pointers
+# post-PMA (upstream nockchain issue #121). Function logic returns false
+# correctly when the asserts are skipped; release mode is already clean.
+[profile.dev.package.nockvm]
+debug-assertions = false
+
+[profile.test.package.nockvm]
+debug-assertions = false

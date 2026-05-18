@@ -36,11 +36,6 @@ fn fixture_app_hoon() -> PathBuf {
         .expect("fixture app.hoon must exist alongside out.jam")
 }
 
-// Post-PMA, nockchain's state_jam import panics inside `is_in_frame`
-// (mem.rs:1108) when re-loading exported state into a fresh NockStack —
-// pointer-relocation regression in nockchain itself, not vesl-checkpoint.
-// Tracking upstream; re-enable once nockchain fixes the round-trip.
-#[ignore = "blocked on nockchain PMA state_jam import regression"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn snapshot_then_resume_round_trip() -> Result<()> {
     let kernel_path = fixture_kernel();
