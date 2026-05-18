@@ -11,7 +11,7 @@
 //! specific shape validation belongs in a Phase 03 validate-graft,
 //! not here.
 
-use nock_noun_rs::{jam_to_bytes, make_atom_in, make_tag_in, new_stack, slab_root, NounSlab};
+use nock_noun_rs::{slab_jam_to_bytes, make_atom_in, make_tag_in, NounSlab};
 use nockvm::noun::T;
 
 /// Build a `[%queue-push payload=@]` poke.
@@ -37,8 +37,7 @@ pub fn build_queue_push_poke(body_jammed: &[u8]) -> NounSlab {
 /// emitting graft, see `vesl_core::rejam_atom` plus the byte-taking
 /// builder.
 pub fn build_queue_push_poke_from_noun(body: &NounSlab) -> NounSlab {
-    let mut stack = new_stack();
-    let jammed = jam_to_bytes(&mut stack, slab_root(body));
+    let jammed = slab_jam_to_bytes(body);
     build_queue_push_poke(&jammed)
 }
 
@@ -63,29 +62,29 @@ pub fn build_queue_clear_poke() -> NounSlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{new_stack};
 
     #[test]
     fn build_queue_push_poke_emits_nonempty_jam() {
         let slab = build_queue_push_poke(b"\x02"); // jam(0) = 0x02
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_queue_pop_poke_emits_nonempty_jam() {
         let slab = build_queue_pop_poke();
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_queue_clear_poke_emits_nonempty_jam() {
         let slab = build_queue_clear_poke();
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -110,13 +109,13 @@ mod tests {
         let body = T(&mut body_slab, &[tag, id]);
         body_slab.set_root(body);
 
-        let mut stack = new_stack();
-        let body_bytes = jam_to_bytes(&mut stack, slab_root(&body_slab));
+        let _stack = new_stack();
+        let body_bytes = slab_jam_to_bytes(&body_slab);
         let from_bytes = build_queue_push_poke(&body_bytes);
         let from_noun = build_queue_push_poke_from_noun(&body_slab);
 
-        let bytes_a = jam_to_bytes(&mut new_stack(), slab_root(&from_bytes));
-        let bytes_b = jam_to_bytes(&mut new_stack(), slab_root(&from_noun));
+        let bytes_a = slab_jam_to_bytes(&from_bytes);
+        let bytes_b = slab_jam_to_bytes(&from_noun);
         assert_eq!(bytes_a, bytes_b);
     }
 

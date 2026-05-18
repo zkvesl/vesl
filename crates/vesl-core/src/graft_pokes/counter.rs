@@ -42,29 +42,29 @@ pub fn build_counter_set_poke(name: &str, value: u64) -> NounSlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{slab_jam_to_bytes, new_stack};
 
     #[test]
     fn build_counter_increment_poke_emits_nonempty_jam() {
         let slab = build_counter_increment_poke("requests");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_counter_reset_poke_emits_nonempty_jam() {
         let slab = build_counter_reset_poke("requests");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_counter_set_poke_emits_nonempty_jam() {
         let slab = build_counter_set_poke("requests", 42);
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 

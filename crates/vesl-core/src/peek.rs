@@ -34,7 +34,7 @@
 //! worked examples.
 
 use nock_noun_rs::{atom_from_u64, make_tag_in, NounSlab};
-use nockvm::noun::{Noun, D, T};
+use nockvm::noun::{Noun, NounAllocator, D, T};
 
 /// Build a `[%<tag> hull=@ ~]` peek path slab.
 ///
@@ -90,9 +90,11 @@ pub fn build_keyless_peek_path(tag: &str) -> NounSlab {
 /// shape) silently return `None` rather than surfacing an error.
 /// If your driver needs strict decode failure, walk the noun yourself.
 pub fn unwrap_triple_unit_atom(result: &NounSlab) -> Option<Vec<u8>> {
+    let space = result.noun_space();
     let maybe_value = strip_triple_unit_envelope(result)?;
+    let handle = maybe_value.in_space(&space);
 
-    if let Ok(atom) = maybe_value.as_atom() {
+    if let Ok(atom) = handle.as_atom() {
         let bytes = atom.as_ne_bytes();
         if bytes.iter().all(|&b| b == 0) {
             return None;
@@ -100,7 +102,7 @@ pub fn unwrap_triple_unit_atom(result: &NounSlab) -> Option<Vec<u8>> {
         return Some(trim_trailing_zeros(bytes).to_vec());
     }
 
-    let value_cell = maybe_value.as_cell().ok()?;
+    let value_cell = handle.as_cell().ok()?;
     let root_atom = value_cell.tail().as_atom().ok()?;
     Some(trim_trailing_zeros(root_atom.as_ne_bytes()).to_vec())
 }
@@ -117,10 +119,11 @@ pub fn unwrap_triple_unit_atom(result: &NounSlab) -> Option<Vec<u8>> {
 /// the graft contract returns `(unit ?)` — the latter conflates
 /// atom-0 (true) with the absent case, which is wrong for loobeans.
 pub fn peek_loobean(result: &NounSlab) -> Option<bool> {
+    let space = result.noun_space();
     let maybe_value = strip_triple_unit_envelope(result)?;
 
     // Inner ~ → no loobean produced for this key.
-    let value_cell = maybe_value.as_cell().ok()?;
+    let value_cell = maybe_value.in_space(&space).as_cell().ok()?;
     let atom = value_cell.tail().as_atom().ok()?;
     match trim_trailing_zeros(atom.as_ne_bytes()) {
         [] => Some(true),    // atom 0 = %.y
@@ -145,17 +148,19 @@ pub fn peek_loobean(result: &NounSlab) -> Option<bool> {
 ///   extra `[~ ...]` layer beyond the standard 2-deep peek wrap; the
 ///   walk handles either depth without caller awareness.
 pub fn peek_atom_u64(result: &NounSlab) -> Option<u64> {
-    let mut noun = unsafe { *result.root() };
+    let noun = unsafe { *result.root() };
+    let space = result.noun_space();
+    let mut handle = noun.in_space(&space);
     loop {
-        if let Ok(atom) = noun.as_atom() {
+        if let Ok(atom) = handle.as_atom() {
             return atom.as_u64().ok();
         }
-        let cell = noun.as_cell().ok()?;
+        let cell = handle.as_cell().ok()?;
         let head = cell.head().as_atom().ok()?;
         if !head.as_ne_bytes().iter().all(|&b| b == 0) {
             return None;
         }
-        noun = cell.tail();
+        handle = cell.tail();
     }
 }
 
@@ -188,10 +193,12 @@ pub fn peek_unit_list<T>(
     result: &NounSlab,
     decode: impl Fn(Noun) -> Option<T>,
 ) -> Option<Vec<T>> {
+    let space = result.noun_space();
     let maybe_value = strip_triple_unit_envelope(result)?;
+    let handle = maybe_value.in_space(&space);
 
     // Inner unit is bare `~` → no value at the path; return empty vec.
-    if let Ok(atom) = maybe_value.as_atom() {
+    if let Ok(atom) = handle.as_atom() {
         if atom.as_ne_bytes().iter().all(|&b| b == 0) {
             return Some(Vec::new());
         }
@@ -199,7 +206,7 @@ pub fn peek_unit_list<T>(
     }
 
     // `[~ list]` cell — strip the `~` head, walk the list tail.
-    let value_cell = maybe_value.as_cell().ok()?;
+    let value_cell = handle.as_cell().ok()?;
     let mut cur = value_cell.tail();
     let mut items = Vec::new();
 
@@ -211,7 +218,7 @@ pub fn peek_unit_list<T>(
             return None; // malformed (non-zero atom mid-list)
         }
         let cell = cur.as_cell().ok()?;
-        items.push(decode(cell.head())?);
+        items.push(decode(cell.head().noun())?);
         cur = cell.tail();
     }
     Some(items)
@@ -233,7 +240,8 @@ pub fn peek_unit_list<T>(
 pub fn effect_head_tag(effect: &NounSlab) -> Option<String> {
     // SAFETY: the slab outlives this function call.
     let root = unsafe { *effect.root() };
-    let cell = root.as_cell().ok()?;
+    let space = effect.noun_space();
+    let cell = root.in_space(&space).as_cell().ok()?;
     let tag_atom = cell.head().as_atom().ok()?;
     let trimmed = trim_trailing_zeros(tag_atom.as_ne_bytes());
     Some(String::from_utf8_lossy(trimmed).into_owned())
@@ -264,7 +272,8 @@ pub fn decode_settle_error(effect: &NounSlab) -> Option<String> {
     }
     // SAFETY: the slab outlives this function call.
     let root = unsafe { *effect.root() };
-    let cell = root.as_cell().ok()?;
+    let space = effect.noun_space();
+    let cell = root.in_space(&space).as_cell().ok()?;
     let msg_atom = cell.tail().as_atom().ok()?;
     let trimmed = trim_trailing_zeros(msg_atom.as_ne_bytes());
     Some(String::from_utf8_lossy(trimmed).into_owned())
@@ -296,7 +305,8 @@ pub fn decode_queue_popped(effects: &[NounSlab]) -> Option<(u64, Vec<u8>)> {
         // Tag matched: effect_head_tag confirmed [%queue-popped *].
         // SAFETY: the slab outlives this function call.
         let root = unsafe { *slab.root() };
-        let cell = root.as_cell().ok()?;
+        let space = slab.noun_space();
+        let cell = root.in_space(&space).as_cell().ok()?;
 
         // Tail is the unit `(unit [id=@ud body=*])`.
         let job = cell.tail();
@@ -334,10 +344,11 @@ fn trim_trailing_zeros(bytes: &[u8]) -> &[u8] {
 /// SAFETY: copies the Noun out of the slab immediately; the slab
 /// outlives every caller of this function.
 fn strip_triple_unit_envelope(result: &NounSlab) -> Option<Noun> {
+    let space = result.noun_space();
     let noun = unsafe { *result.root() };
-    let outer = noun.as_cell().ok()?;
+    let outer = noun.in_space(&space).as_cell().ok()?;
     let inner_cell = outer.tail().as_cell().ok()?;
-    Some(inner_cell.tail())
+    Some(inner_cell.tail().noun())
 }
 
 #[cfg(test)]
@@ -348,7 +359,8 @@ mod tests {
     fn build_hull_peek_path_emits_three_element_path() {
         let slab = build_hull_peek_path("settle-registered", 42);
         let noun = unsafe { *slab.root() };
-        let outer = noun.as_cell().expect("outer cell");
+        let space = slab.noun_space();
+        let outer = noun.in_space(&space).as_cell().expect("outer cell");
         let _tag = outer.head();
         let tail = outer.tail().as_cell().expect("tail cell");
         let _hull = tail.head();
@@ -363,9 +375,11 @@ mod tests {
     fn build_keyed_peek_path_round_trips_cord() {
         let slab = build_keyed_peek_path("kv-value", "greeting");
         let noun = unsafe { *slab.root() };
-        let outer = noun.as_cell().unwrap();
+        let space = slab.noun_space();
+        let outer = noun.in_space(&space).as_cell().unwrap();
         let tail = outer.tail().as_cell().unwrap();
-        let key_bytes = tail.head().as_atom().unwrap().as_ne_bytes().to_vec();
+        let key_atom = tail.head().as_atom().unwrap();
+        let key_bytes = key_atom.as_ne_bytes().to_vec();
         assert_eq!(trim_trailing_zeros(&key_bytes), b"greeting");
     }
 
@@ -373,7 +387,8 @@ mod tests {
     fn build_keyless_peek_path_is_two_element() {
         let slab = build_keyless_peek_path("log-len");
         let noun = unsafe { *slab.root() };
-        let outer = noun.as_cell().unwrap();
+        let space = slab.noun_space();
+        let outer = noun.in_space(&space).as_cell().unwrap();
         assert_eq!(
             outer.tail().as_atom().unwrap().as_u64().unwrap(),
             0,
@@ -398,8 +413,10 @@ mod tests {
     fn peek_unit_list_returns_empty_for_inner_unit_zero() {
         // [~ [~ ~]] — path bound, no value installed.
         let slab = wrap_triple_unit(|_| D(0));
-        let result: Option<Vec<u64>> =
-            peek_unit_list(&slab, |n| n.as_atom().ok().and_then(|a| a.as_u64().ok()));
+        let space = slab.noun_space();
+        let result: Option<Vec<u64>> = peek_unit_list(&slab, |n| {
+            n.in_space(&space).as_atom().ok().and_then(|a| a.as_u64().ok())
+        });
         assert_eq!(result, Some(Vec::new()));
     }
 
@@ -413,8 +430,10 @@ mod tests {
             let list = T(s, &[one, two, three, D(0)]);
             T(s, &[D(0), list])
         });
-        let result: Option<Vec<u64>> =
-            peek_unit_list(&slab, |n| n.as_atom().ok().and_then(|a| a.as_u64().ok()));
+        let space = slab.noun_space();
+        let result: Option<Vec<u64>> = peek_unit_list(&slab, |n| {
+            n.in_space(&space).as_atom().ok().and_then(|a| a.as_u64().ok())
+        });
         assert_eq!(result, Some(vec![1u64, 2, 3]));
     }
 
@@ -427,8 +446,9 @@ mod tests {
             let list = T(s, &[one, two, D(0)]);
             T(s, &[D(0), list])
         });
+        let space = slab.noun_space();
         let result: Option<Vec<u64>> = peek_unit_list(&slab, |n| {
-            let v = n.as_atom().ok()?.as_u64().ok()?;
+            let v = n.in_space(&space).as_atom().ok()?.as_u64().ok()?;
             if v == 99 { None } else { Some(v) }
         });
         assert_eq!(result, None);

@@ -6,7 +6,7 @@
 //! the poke arm under a mule guard — pre-jam your record on the
 //! Rust side.
 
-use nock_noun_rs::{atom_from_u64, jam_to_bytes, make_atom_in, make_tag_in, new_stack, slab_root, NounSlab};
+use nock_noun_rs::{atom_from_u64, slab_jam_to_bytes, make_atom_in, make_tag_in, NounSlab};
 use nockvm::noun::T;
 
 /// Build a `[%registry-put key=@ payload=@]` poke.
@@ -45,16 +45,14 @@ pub fn build_registry_update_poke(key: u64, record_jammed: &[u8]) -> NounSlab {
 /// emitting graft, see `vesl_core::rejam_atom` plus the byte-taking
 /// builder.
 pub fn build_registry_put_poke_from_noun(key: u64, record: &NounSlab) -> NounSlab {
-    let mut stack = new_stack();
-    let jammed = jam_to_bytes(&mut stack, slab_root(record));
+    let jammed = slab_jam_to_bytes(record);
     build_registry_put_poke(key, &jammed)
 }
 
 /// Build a `[%registry-update key=@ payload=@]` poke from an in-process
 /// noun. Mirrors `build_registry_put_poke_from_noun`.
 pub fn build_registry_update_poke_from_noun(key: u64, record: &NounSlab) -> NounSlab {
-    let mut stack = new_stack();
-    let jammed = jam_to_bytes(&mut stack, slab_root(record));
+    let jammed = slab_jam_to_bytes(record);
     build_registry_update_poke(key, &jammed)
 }
 
@@ -71,29 +69,29 @@ pub fn build_registry_del_poke(key: u64) -> NounSlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{new_stack};
 
     #[test]
     fn build_registry_put_poke_emits_nonempty_jam() {
         let slab = build_registry_put_poke(1, &[0x02]); // jam(0)
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_registry_update_poke_emits_nonempty_jam() {
         let slab = build_registry_update_poke(1, &[0x02]);
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_registry_del_poke_emits_nonempty_jam() {
         let slab = build_registry_del_poke(1);
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -117,13 +115,13 @@ mod tests {
         let record = T(&mut record_slab, &[kind_tag, weight]);
         record_slab.set_root(record);
 
-        let mut stack = new_stack();
-        let record_bytes = jam_to_bytes(&mut stack, slab_root(&record_slab));
+        let _stack = new_stack();
+        let record_bytes = slab_jam_to_bytes(&record_slab);
         let from_bytes = build_registry_put_poke(1, &record_bytes);
         let from_noun = build_registry_put_poke_from_noun(1, &record_slab);
 
-        let bytes_a = jam_to_bytes(&mut new_stack(), slab_root(&from_bytes));
-        let bytes_b = jam_to_bytes(&mut new_stack(), slab_root(&from_noun));
+        let bytes_a = slab_jam_to_bytes(&from_bytes);
+        let bytes_b = slab_jam_to_bytes(&from_noun);
         assert_eq!(bytes_a, bytes_b);
     }
 
@@ -135,13 +133,13 @@ mod tests {
         let record = T(&mut record_slab, &[kind_tag, weight]);
         record_slab.set_root(record);
 
-        let mut stack = new_stack();
-        let record_bytes = jam_to_bytes(&mut stack, slab_root(&record_slab));
+        let _stack = new_stack();
+        let record_bytes = slab_jam_to_bytes(&record_slab);
         let from_bytes = build_registry_update_poke(1, &record_bytes);
         let from_noun = build_registry_update_poke_from_noun(1, &record_slab);
 
-        let bytes_a = jam_to_bytes(&mut new_stack(), slab_root(&from_bytes));
-        let bytes_b = jam_to_bytes(&mut new_stack(), slab_root(&from_noun));
+        let bytes_a = slab_jam_to_bytes(&from_bytes);
+        let bytes_b = slab_jam_to_bytes(&from_noun);
         assert_eq!(bytes_a, bytes_b);
     }
 

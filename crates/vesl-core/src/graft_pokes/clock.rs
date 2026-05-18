@@ -25,13 +25,13 @@ pub fn build_clock_tick_poke() -> NounSlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{slab_jam_to_bytes, new_stack};
 
     #[test]
     fn build_clock_tick_poke_emits_nonempty_jam() {
         let slab = build_clock_tick_poke();
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 }

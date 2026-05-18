@@ -14,7 +14,7 @@
 //! pattern from queue-graft / log-graft.
 
 use nock_noun_rs::{
-    atom_from_u64, jam_to_bytes, make_atom_in, make_tag_in, new_stack, slab_root, NounSlab,
+    atom_from_u64, slab_jam_to_bytes, make_atom_in, make_tag_in, NounSlab,
 };
 use nockvm::noun::{D, T};
 
@@ -56,8 +56,7 @@ pub fn build_batch_add_poke(intent_jammed: &[u8]) -> NounSlab {
 /// emitting graft, see `vesl_core::rejam_atom` plus the byte-taking
 /// builder.
 pub fn build_batch_add_poke_from_noun(intent: &NounSlab) -> NounSlab {
-    let mut stack = new_stack();
-    let jammed = jam_to_bytes(&mut stack, slab_root(intent));
+    let jammed = slab_jam_to_bytes(intent);
     build_batch_add_poke(&jammed)
 }
 
@@ -73,13 +72,13 @@ pub fn build_batch_flush_poke() -> NounSlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{new_stack};
 
     #[test]
     fn build_batch_init_poke_emits_nonempty_jam() {
         let slab = build_batch_init_poke(5);
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -99,8 +98,8 @@ mod tests {
     #[test]
     fn build_batch_add_poke_emits_nonempty_jam() {
         let slab = build_batch_add_poke(b"\x02"); // jam(0)
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -118,8 +117,8 @@ mod tests {
     #[test]
     fn build_batch_flush_poke_emits_nonempty_jam() {
         let slab = build_batch_flush_poke();
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -131,13 +130,13 @@ mod tests {
         let intent = T(&mut intent_slab, &[tag, amount]);
         intent_slab.set_root(intent);
 
-        let mut stack = new_stack();
-        let intent_bytes = jam_to_bytes(&mut stack, slab_root(&intent_slab));
+        let _stack = new_stack();
+        let intent_bytes = slab_jam_to_bytes(&intent_slab);
         let from_bytes = build_batch_add_poke(&intent_bytes);
         let from_noun = build_batch_add_poke_from_noun(&intent_slab);
 
-        let bytes_a = jam_to_bytes(&mut new_stack(), slab_root(&from_bytes));
-        let bytes_b = jam_to_bytes(&mut new_stack(), slab_root(&from_noun));
+        let bytes_a = slab_jam_to_bytes(&from_bytes);
+        let bytes_b = slab_jam_to_bytes(&from_noun);
         assert_eq!(bytes_a, bytes_b);
     }
 

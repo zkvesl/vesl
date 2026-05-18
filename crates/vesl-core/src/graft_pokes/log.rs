@@ -12,7 +12,7 @@
 //!
 //! Pair with the `%log-append` arm installed by `graft-inject`.
 
-use nock_noun_rs::{jam_to_bytes, make_atom_in, make_tag_in, new_stack, slab_root, NounSlab};
+use nock_noun_rs::{slab_jam_to_bytes, make_atom_in, make_tag_in, NounSlab};
 use nockvm::noun::T;
 
 /// Build a `[%log-append tag=@ta payload=@]` poke.
@@ -42,21 +42,20 @@ pub fn build_log_append_poke(tag: &str, data_jammed: &[u8]) -> NounSlab {
 /// emitting graft, see `vesl_core::rejam_atom` plus the byte-taking
 /// builder.
 pub fn build_log_append_poke_from_noun(tag: &str, payload: &NounSlab) -> NounSlab {
-    let mut stack = new_stack();
-    let jammed = jam_to_bytes(&mut stack, slab_root(payload));
+    let jammed = slab_jam_to_bytes(payload);
     build_log_append_poke(tag, &jammed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{new_stack};
 
     #[test]
     fn build_log_append_poke_emits_nonempty_jam() {
         let slab = build_log_append_poke("settle", b"\x02"); // jam(0) = 0x02
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -79,13 +78,13 @@ mod tests {
         let payload = T(&mut payload_slab, &[event_tag, amount]);
         payload_slab.set_root(payload);
 
-        let mut stack = new_stack();
-        let payload_bytes = jam_to_bytes(&mut stack, slab_root(&payload_slab));
+        let _stack = new_stack();
+        let payload_bytes = slab_jam_to_bytes(&payload_slab);
         let from_bytes = build_log_append_poke("settle", &payload_bytes);
         let from_noun = build_log_append_poke_from_noun("settle", &payload_slab);
 
-        let bytes_a = jam_to_bytes(&mut new_stack(), slab_root(&from_bytes));
-        let bytes_b = jam_to_bytes(&mut new_stack(), slab_root(&from_noun));
+        let bytes_a = slab_jam_to_bytes(&from_bytes);
+        let bytes_b = slab_jam_to_bytes(&from_noun);
         assert_eq!(bytes_a, bytes_b);
     }
 

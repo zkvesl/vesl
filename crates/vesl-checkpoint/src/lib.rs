@@ -178,6 +178,22 @@ pub async fn resume(
     snapshot: &Snapshot,
     name: &str,
 ) -> Result<NockApp> {
+    resume_with_data_dir(jam_path, snapshot, name, None).await
+}
+
+/// Resume with an explicit `data_dir` for the rebooted app.
+///
+/// Post-PMA, `boot::setup` requires `--state-jam` to be paired with `--new`
+/// and refuses `--new` against a non-empty data directory. Callers (especially
+/// tests) need a way to point the resumed kernel at a fresh dir so successive
+/// runs don't collide. Pass `None` to keep the default-data-dir behavior; pass
+/// `Some(path)` to force a clean target.
+pub async fn resume_with_data_dir(
+    jam_path: &Path,
+    snapshot: &Snapshot,
+    name: &str,
+    data_dir: Option<PathBuf>,
+) -> Result<NockApp> {
     let kernel_bytes = tokio::fs::read(jam_path)
         .await
         .with_context(|| format!("read kernel jam at {}", jam_path.display()))?;
@@ -190,6 +206,13 @@ pub async fn resume(
             .context("snapshot state.jam path is not utf-8")?
             .to_string(),
     );
+    // Post-PMA, boot::setup rejects --state-jam without --new (see
+    // nockapp::kernel::boot:2241). Resume loads state.jam into a fresh
+    // kernel — set both flags together.
+    cli.new = true;
+    if let Some(dir) = data_dir {
+        cli.data_dir = Some(dir);
+    }
 
     boot::setup(&kernel_bytes, cli, &[], name, None)
         .await

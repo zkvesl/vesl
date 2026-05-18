@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 
-use nock_noun_rs::{slab_root, NounSlab};
+use nock_noun_rs::NounSlab;
 use nockchain_client_rs::ChainClient;
 use nockchain_tip5_rs::{verify_proof, Tip5Hash};
 
@@ -177,8 +177,7 @@ impl<V: CommitmentVerifier> Settle<V> {
     /// it to `NockApp::poke()` themselves.
     pub fn poke_bytes(&self, payload: &GraftPayload) -> Result<Vec<u8>> {
         let slab = self.verifier.build_settle_poke(payload)?;
-        let mut stack = nock_noun_rs::new_stack();
-        Ok(nock_noun_rs::jam_to_bytes(&mut stack, slab_root(&slab)))
+        Ok(nock_noun_rs::slab_jam_to_bytes(&slab))
     }
 
     /// Settle a manifest directly (convenience for RAG callers).
@@ -357,15 +356,19 @@ fn build_settlement_poke_with_verb(
 ) -> NounSlab {
     use nock_noun_rs::*;
 
+    // Post-PMA: build the payload in its own slab and jam via slab_jam_to_bytes
+    // so the arena-pointer check passes; the outer poke is a separate slab.
+    let payload_bytes = {
+        let mut payload_slab = NounSlab::new();
+        let payload =
+            build_settlement_payload_in(&mut payload_slab, note, manifest, expected_root);
+        payload_slab.set_root(payload);
+        slab_jam_to_bytes(&payload_slab)
+    };
+
     let mut slab = NounSlab::new();
     let tag = make_tag_in(&mut slab, verb);
-    let payload = build_settlement_payload_in(&mut slab, note, manifest, expected_root);
-    let payload_bytes = {
-        let mut stack = new_stack();
-        jam_to_bytes(&mut stack, payload)
-    };
     let jammed = make_atom_in(&mut slab, &payload_bytes);
-
     let poke = nockvm::noun::T(&mut slab, &[tag, jammed]);
     slab.set_root(poke);
     slab
@@ -441,6 +444,7 @@ mod tests {
     use super::*;
     use crate::types::{Chunk, GraftPayload, NoteState, Retrieval};
     use crate::Mint;
+    use nock_noun_rs::slab_root;
 
     /// Build a valid manifest + root for testing.
     fn build_test_manifest() -> (Manifest, Tip5Hash) {

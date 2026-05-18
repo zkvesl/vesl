@@ -158,6 +158,17 @@ pub fn jam_to_bytes(stack: &mut NockStack, noun: Noun) -> Vec<u8> {
     bytes[..len].to_vec()
 }
 
+/// Jam a `NounSlab`'s root noun to wire bytes.
+///
+/// Post-PMA the noun-allocator's arena identity is checked at jam time, so a
+/// slab-allocated noun cannot be jammed through a foreign `NockStack`. This
+/// helper uses the slab's own `NounSpace` for the jam — the same path
+/// `NounSlab::jam` follows internally — and returns a `Vec<u8>` for callers
+/// that previously consumed `jam_to_bytes(&mut new_stack(), slab_root(&slab))`.
+pub fn slab_jam_to_bytes<J: nockapp::noun::slab::Jammer>(slab: &NounSlab<J>) -> Vec<u8> {
+    slab.jam().to_vec()
+}
+
 /// Cue bytes back into a noun.
 ///
 /// Inverse of `jam_to_bytes`. Returns `None` if the bytes are not

@@ -75,21 +75,21 @@ fn build_rules_list(slab: &mut NounSlab, rules: &[Rule]) -> nockvm::noun::Noun {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{slab_jam_to_bytes, new_stack};
 
     #[test]
     fn build_validate_init_poke_emits_nonempty_jam() {
         let slab = build_validate_init_poke("counter-set", &[Rule::NonEmpty]);
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_validate_init_poke_handles_empty_rules() {
         let slab = build_validate_init_poke("counter-set", &[]);
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -102,16 +102,16 @@ mod tests {
             "counter-set",
             &[Rule::NonEmpty, Rule::NonEmpty, Rule::NonEmpty],
         );
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_validate_clear_poke_emits_nonempty_jam() {
         let slab = build_validate_clear_poke("counter-set");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 }

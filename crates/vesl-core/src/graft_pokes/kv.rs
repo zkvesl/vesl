@@ -35,21 +35,21 @@ pub fn build_kv_delete_poke(key: &str) -> NounSlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{slab_jam_to_bytes, new_stack};
 
     #[test]
     fn build_kv_set_poke_emits_nonempty_jam() {
         let slab = build_kv_set_poke("greeting", b"hello world");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_kv_delete_poke_emits_nonempty_jam() {
         let slab = build_kv_delete_poke("greeting");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 

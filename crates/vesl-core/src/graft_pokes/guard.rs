@@ -44,7 +44,7 @@ pub fn build_guard_check_poke(hull: u64, data: &[u8]) -> NounSlab {
 mod tests {
     use super::*;
     use crate::Mint;
-    use nock_noun_rs::{jam_to_bytes, new_stack, slab_root};
+    use nock_noun_rs::{slab_jam_to_bytes, new_stack};
 
     fn fixture_root() -> Tip5Hash {
         let data: [&[u8]; 1] = [b"hello world"];
@@ -55,16 +55,16 @@ mod tests {
     #[test]
     fn build_guard_register_poke_emits_nonempty_jam() {
         let slab = build_guard_register_poke(1, &fixture_root());
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn build_guard_check_poke_emits_nonempty_jam() {
         let slab = build_guard_check_poke(1, b"hello world");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 

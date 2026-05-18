@@ -22,8 +22,8 @@
 //! `%settle-settle` and avoids collision with `%mint-commit`.
 
 use nock_noun_rs::{
-    atom_from_u64, jam_to_bytes, make_atom_in, make_cord_in, make_list_in, make_loobean,
-    make_tag_in, new_stack, NounSlab,
+    atom_from_u64, make_atom_in, make_cord_in, make_list_in, make_loobean,
+    make_tag_in, slab_jam_to_bytes, NounSlab,
 };
 use nockchain_tip5_rs::{tip5_to_atom_le_bytes, ProofNode, Tip5Hash};
 use nockchain_types::tx_engine::common::{SchnorrPubkey, SchnorrSignature};
@@ -324,14 +324,21 @@ fn build_settle_payload_poke<F>(
 where
     F: FnOnce(&mut NounSlab) -> Noun,
 {
+    // Post-PMA: a noun built into a slab cannot be jammed through a foreign
+    // NockStack — the arena-pointer check rejects it. Build the payload in its
+    // own slab and jam it with that slab's NounSpace, then carry the bytes into
+    // the outer poke slab.
+    let payload_bytes = {
+        let mut payload_slab = NounSlab::new();
+        let data = build_data(&mut payload_slab);
+        let payload =
+            build_graft_single_leaf_payload_in(&mut payload_slab, note_id, hull, root, data);
+        payload_slab.set_root(payload);
+        slab_jam_to_bytes(&payload_slab)
+    };
+
     let mut slab = NounSlab::new();
     let tag = make_tag_in(&mut slab, verb);
-    let data = build_data(&mut slab);
-    let payload = build_graft_single_leaf_payload_in(&mut slab, note_id, hull, root, data);
-    let payload_bytes = {
-        let mut stack = new_stack();
-        jam_to_bytes(&mut stack, payload)
-    };
     let jammed = make_atom_in(&mut slab, &payload_bytes);
     let poke = T(&mut slab, &[tag, jammed]);
     slab.set_root(poke);
@@ -381,8 +388,8 @@ pub fn build_graft_single_leaf_payload_jammed(
     let mut slab = NounSlab::new();
     let data_atom = make_atom_in(&mut slab, data);
     let payload = build_graft_single_leaf_payload_in(&mut slab, note_id, hull, root, data_atom);
-    let mut stack = new_stack();
-    jam_to_bytes(&mut stack, payload)
+    slab.set_root(payload);
+    slab_jam_to_bytes(&slab)
 }
 
 /// Build a `[%<verb> jammed]` poke wrapping pre-jammed graft-payload
@@ -406,7 +413,8 @@ pub fn build_settle_poke_jammed(verb: &str, payload: &[u8]) -> NounSlab {
 mod tests {
     use super::*;
     use crate::Mint;
-    use nock_noun_rs::slab_root;
+    use nock_noun_rs::new_stack;
+    use nockvm::noun::NounAllocator;
 
     fn fixture_root() -> Tip5Hash {
         let data: [&[u8]; 1] = [b"hello world"];
@@ -417,8 +425,8 @@ mod tests {
     #[test]
     fn build_settle_register_poke_emits_nonempty_jam() {
         let slab = build_settle_register_poke(1, &fixture_root());
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -426,8 +434,8 @@ mod tests {
     fn build_settle_note_poke_emits_nonempty_jam() {
         let root = fixture_root();
         let slab = build_settle_note_poke(101, 1, &root, b"hello world");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -435,8 +443,8 @@ mod tests {
     fn build_settle_verify_poke_emits_nonempty_jam() {
         let root = fixture_root();
         let slab = build_settle_verify_poke(101, 1, &root, b"hello world");
-        let mut stack = new_stack();
-        let bytes = jam_to_bytes(&mut stack, slab_root(&slab));
+        let _stack = new_stack();
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -448,14 +456,26 @@ mod tests {
         let s = build_settle_note_poke(7, 3, &root, b"x");
         let v = build_settle_verify_poke(7, 3, &root, b"x");
 
-        // Pull the second slot (the jammed payload) from each NounSlab.
+        // Pull the second slot (the jammed payload atom) from each NounSlab
+        // and compare raw atom bytes — both pokes share the same payload bytes
+        // by construction, even though their cause tag differs.
         let s_payload = unsafe {
-            let cell = (*s.root()).as_cell().expect("note poke is a cell");
-            jam_to_bytes(&mut new_stack(), cell.tail())
+            let space = s.noun_space();
+            let cell = (*s.root())
+                .in_space(&space)
+                .as_cell()
+                .expect("note poke is a cell");
+            let tail = cell.tail().as_atom().expect("payload is an atom");
+            tail.to_ne_bytes()
         };
         let v_payload = unsafe {
-            let cell = (*v.root()).as_cell().expect("verify poke is a cell");
-            jam_to_bytes(&mut new_stack(), cell.tail())
+            let space = v.noun_space();
+            let cell = (*v.root())
+                .in_space(&space)
+                .as_cell()
+                .expect("verify poke is a cell");
+            let tail = cell.tail().as_atom().expect("payload is an atom");
+            tail.to_ne_bytes()
         };
         assert_eq!(s_payload, v_payload);
     }
@@ -488,7 +508,7 @@ mod tests {
         let payload =
             build_graft_single_leaf_payload_jammed(1, 1, &fixture_root(), b"hello");
         let slab = build_settle_poke_jammed("settle-verify", &payload);
-        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -500,7 +520,7 @@ mod tests {
             let b = make_atom_in(slab, b"b");
             T(slab, &[a, b])
         });
-        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -514,8 +534,8 @@ mod tests {
         let via_closure = build_settle_note_poke_with_data(11, 2, &root, |slab| {
             make_atom_in(slab, b"x")
         });
-        let a = jam_to_bytes(&mut new_stack(), slab_root(&flat));
-        let b = jam_to_bytes(&mut new_stack(), slab_root(&via_closure));
+        let a = slab_jam_to_bytes(&flat);
+        let b = slab_jam_to_bytes(&via_closure);
         assert_eq!(a, b);
     }
 
@@ -550,7 +570,7 @@ mod tests {
         let digest = crate::signing::schnorr_message_digest_for_data(data);
         let sig = crate::signing::sign(&sk, &digest).expect("sign");
         let slab = build_settle_note_schnorr_poke(101, 1, &root, data, &sig, &pubkey);
-        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -565,7 +585,7 @@ mod tests {
             &[0u8; 64],
             &[0u8; 32],
         );
-        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -574,7 +594,7 @@ mod tests {
         let root = fixture_root();
         let slab =
             build_settle_note_membership_poke(7, 1, &root, b"alice", &fixture_proof());
-        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -583,7 +603,7 @@ mod tests {
         let root = fixture_root();
         let slab =
             build_settle_note_bounded_poke(9, 1, &root, 42, (10, 100), &fixture_proof());
-        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -596,7 +616,7 @@ mod tests {
         ];
         let proofs = vec![fixture_proof(), fixture_proof()];
         let slab = build_settle_note_manifest_poke(13, 1, &root, fields, &proofs);
-        let bytes = jam_to_bytes(&mut new_stack(), slab_root(&slab));
+        let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
 
@@ -606,14 +626,14 @@ mod tests {
         let root = fixture_root();
         let a = build_vesl_register_poke(1, &root);
         let b = build_settle_register_poke(1, &root);
-        let ab = jam_to_bytes(&mut new_stack(), slab_root(&a));
-        let bb = jam_to_bytes(&mut new_stack(), slab_root(&b));
+        let ab = slab_jam_to_bytes(&a);
+        let bb = slab_jam_to_bytes(&b);
         assert_eq!(ab, bb);
 
         let c = build_vesl_settle_poke(7, 3, &root, b"x");
         let d = build_settle_note_poke(7, 3, &root, b"x");
-        let cb = jam_to_bytes(&mut new_stack(), slab_root(&c));
-        let db = jam_to_bytes(&mut new_stack(), slab_root(&d));
+        let cb = slab_jam_to_bytes(&c);
+        let db = slab_jam_to_bytes(&d);
         assert_eq!(cb, db);
     }
 }
