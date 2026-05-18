@@ -122,6 +122,7 @@
       [%settle-verified ok=?]
       [%settle-epoch-rotated old-epoch=@ new-epoch=@]
       [%settle-error msg=@t]
+      [%settle-register-rejected hull=@ existing-root=@]
   ==
 ::
 ::  +$settle-cause: tagged pokes the Graft handles
@@ -148,8 +149,9 @@
     ::  Guard: reject re-registration (hull already has a root; M-01)
     ::
     ?:  (~(has by registered.state) hull.cause)
+      =/  existing  (~(got by registered.state) hull.cause)
       :_  state
-      ~[[%settle-error 'settle-graft: hull already registered']]
+      ~[[%settle-register-rejected hull.cause existing]]
     ::  Guard: registered map capacity (H-02)
     ::
     ?:  (gte ~(wyt by registered.state) registered-cap)
