@@ -32,7 +32,7 @@ use anyhow::{Context, Result};
 use nockapp::noun::slab::{NockJammer, NounSlab};
 use nockchain_tip5_rs::Tip5Hash;
 use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
-use nockvm::noun::{IndirectAtom, Noun, D, T};
+use nockvm::noun::{IndirectAtom, Noun, NounAllocator, D, T};
 
 /// Dereference a NounSlab's root noun (C-001 / AUDIT H-06).
 ///
@@ -93,7 +93,8 @@ pub fn jam_opaque_bytes_entry(key: &str, raw_bytes: &[u8]) -> NoteDataEntry {
     } else {
         unsafe {
             let mut indirect = IndirectAtom::new_raw_bytes_ref(&mut slab, raw_bytes);
-            indirect.normalize_as_atom().as_noun()
+            let space = slab.noun_space();
+            indirect.normalize_as_atom(&space).as_noun()
         }
     };
     slab.set_root(noun);
@@ -113,7 +114,8 @@ pub fn u64_to_noun(slab: &mut NounSlab<NockJammer>, val: u64) -> Noun {
         let bytes = val.to_le_bytes();
         unsafe {
             let mut indirect = IndirectAtom::new_raw_bytes_ref(slab, &bytes);
-            indirect.normalize_as_atom().as_noun()
+            let space = slab.noun_space();
+            indirect.normalize_as_atom(&space).as_noun()
         }
     }
 }
@@ -129,7 +131,9 @@ pub fn find_u64_entry(data: &NoteData, key: &str) -> Result<u64> {
     slab.cue_into(entry.blob.clone())
         .context("failed to cue NoteDataEntry blob")?;
     let noun = slab_root(&slab);
+    let space = slab.noun_space();
     let atom = noun
+        .in_space(&space)
         .as_atom()
         .map_err(|_| anyhow::anyhow!("expected atom for key '{key}', got cell"))?;
     atom.as_u64()
@@ -145,10 +149,12 @@ pub fn find_hash_entry(data: &NoteData, key: &str) -> Result<Tip5Hash> {
     let mut slab: NounSlab<NockJammer> = NounSlab::new();
     slab.cue_into(entry.blob.clone())
         .context("failed to cue NoteDataEntry blob")?;
-    let mut noun = slab_root(&slab);
+    let noun = slab_root(&slab);
+    let space = slab.noun_space();
+    let mut handle = noun.in_space(&space);
     let mut limbs = [0u64; 5];
     for (i, limb) in limbs.iter_mut().enumerate() {
-        let cell = noun.as_cell().map_err(|_| {
+        let cell = handle.as_cell().map_err(|_| {
             anyhow::anyhow!("tip5 hash list too short at index {i} for key '{key}'")
         })?;
         let atom = cell.head().as_atom().map_err(|_| {
@@ -157,7 +163,7 @@ pub fn find_hash_entry(data: &NoteData, key: &str) -> Result<Tip5Hash> {
         *limb = atom
             .as_u64()
             .map_err(|_| anyhow::anyhow!("tip5 limb {i} exceeds u64 for key '{key}'"))?;
-        noun = cell.tail();
+        handle = cell.tail();
     }
     Ok(limbs)
 }
@@ -172,7 +178,9 @@ pub fn find_opaque_bytes_entry(data: &NoteData, key: &str) -> Result<Vec<u8>> {
     slab.cue_into(entry.blob.clone())
         .context("failed to cue NoteDataEntry blob")?;
     let noun = slab_root(&slab);
+    let space = slab.noun_space();
     let atom = noun
+        .in_space(&space)
         .as_atom()
         .map_err(|_| anyhow::anyhow!("expected atom for key '{key}', got cell"))?;
     let bytes = atom.as_ne_bytes();
