@@ -246,6 +246,30 @@ pub fn effect_head_tags(effects: &[NounSlab]) -> Vec<String> {
     effects.iter().filter_map(effect_head_tag).collect()
 }
 
+/// Decode the `msg=@t` cord from a `[%settle-error msg=@t]` effect.
+///
+/// Returns `Some(cord)` when the effect is shaped `[%settle-error <atom>]`
+/// — the kernel's typed-rejection shape for settle-graft (see
+/// `protocol/lib/settle-graft.hoon`'s `+$ settle-effect`). Returns `None`
+/// for any other shape: wrong head tag, atom-only effect, or a cell-tailed
+/// effect.
+///
+/// The cord is decoded with the same `trim_trailing_zeros` +
+/// `String::from_utf8_lossy` convention as [`effect_head_tag`], so the
+/// function never returns `None` purely on byte-encoding noise — only when
+/// the effect's *shape* prevents a cord from being read.
+pub fn decode_settle_error(effect: &NounSlab) -> Option<String> {
+    if effect_head_tag(effect).as_deref() != Some("settle-error") {
+        return None;
+    }
+    // SAFETY: the slab outlives this function call.
+    let root = unsafe { *effect.root() };
+    let cell = root.as_cell().ok()?;
+    let msg_atom = cell.tail().as_atom().ok()?;
+    let trimmed = trim_trailing_zeros(msg_atom.as_ne_bytes());
+    Some(String::from_utf8_lossy(trimmed).into_owned())
+}
+
 /// Decode a `%queue-popped` effect into `(id, body_bytes)`.
 ///
 /// Walks `effects` looking for the first cell whose head is the cord
@@ -614,5 +638,39 @@ mod tests {
             tags,
             vec!["settle-registered".to_string(), "settle-noted".to_string()],
         );
+    }
+
+    // ---- decode_settle_error ----
+
+    #[test]
+    fn decode_settle_error_returns_cord_for_well_formed_effect() {
+        // [%settle-error 'settle-graft: note already settled']
+        let mut slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut slab, "settle-error");
+        let msg = nock_noun_rs::make_atom_in(&mut slab, b"settle-graft: note already settled");
+        let effect = T(&mut slab, &[tag, msg]);
+        slab.set_root(effect);
+        assert_eq!(
+            decode_settle_error(&slab).as_deref(),
+            Some("settle-graft: note already settled"),
+        );
+    }
+
+    #[test]
+    fn decode_settle_error_returns_none_for_wrong_head_tag() {
+        // [%settle-noted *] — different tag, decoder must skip.
+        let mut slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut slab, "settle-noted");
+        let effect = T(&mut slab, &[tag, D(0)]);
+        slab.set_root(effect);
+        assert_eq!(decode_settle_error(&slab), None);
+    }
+
+    #[test]
+    fn decode_settle_error_returns_none_for_atom_only_effect() {
+        // Bare atom — no head/tail.
+        let mut slab: NounSlab = NounSlab::new();
+        slab.set_root(D(42));
+        assert_eq!(decode_settle_error(&slab), None);
     }
 }
