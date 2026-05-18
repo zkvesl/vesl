@@ -102,7 +102,8 @@ pub fn make_atom(stack: &mut NockStack, bytes: &[u8]) -> Noun {
     // allocator; normalize_as_atom yields a canonical atom.
     unsafe {
         let mut indirect = IndirectAtom::new_raw_bytes_ref(stack, bytes);
-        indirect.normalize_as_atom().as_noun()
+        let space = stack.noun_space();
+        indirect.normalize_as_atom(&space).as_noun()
     }
 }
 
@@ -150,7 +151,9 @@ pub fn make_list(stack: &mut NockStack, items: &[Noun]) -> Noun {
 /// This is the format Hoon's `cue` expects.
 pub fn jam_to_bytes(stack: &mut NockStack, noun: Noun) -> Vec<u8> {
     let atom = jam(stack, noun);
-    let bytes = atom.as_ne_bytes();
+    let space = stack.noun_space();
+    let handle = atom.in_space(&space);
+    let bytes = handle.as_ne_bytes();
     let len = bytes.iter().rposition(|&b| b != 0).map_or(0, |pos| pos + 1);
     bytes[..len].to_vec()
 }
@@ -210,7 +213,8 @@ pub fn make_atom_in(alloc: &mut impl NounAllocator, bytes: &[u8]) -> Noun {
     // normalize_as_atom yields a canonical atom.
     unsafe {
         let mut indirect = IndirectAtom::new_raw_bytes_ref(alloc, bytes);
-        indirect.normalize_as_atom().as_noun()
+        let space = alloc.noun_space();
+        indirect.normalize_as_atom(&space).as_noun()
     }
 }
 
@@ -250,8 +254,16 @@ mod tests {
     #[test]
     fn loobean_encoding() {
         // %.y (true) = 0, %.n (false) = 1
-        assert_eq!(make_loobean(true).as_atom().unwrap().as_u64().unwrap(), 0);
-        assert_eq!(make_loobean(false).as_atom().unwrap().as_u64().unwrap(), 1);
+        let stack = new_stack();
+        let space = stack.noun_space();
+        assert_eq!(
+            make_loobean(true).in_space(&space).as_atom().unwrap().as_u64().unwrap(),
+            0,
+        );
+        assert_eq!(
+            make_loobean(false).in_space(&space).as_atom().unwrap().as_u64().unwrap(),
+            1,
+        );
     }
 
     #[test]
@@ -259,7 +271,8 @@ mod tests {
         let mut stack = new_stack();
         // 'abc' in Hoon = 97 + 98*256 + 99*65536 = 6513249
         let abc = make_cord(&mut stack, "abc");
-        let val = abc.as_atom().unwrap().as_u64().unwrap();
+        let space = stack.noun_space();
+        let val = abc.in_space(&space).as_atom().unwrap().as_u64().unwrap();
         assert_eq!(val, 97 + 98 * 256 + 99 * 65536);
     }
 
@@ -273,7 +286,8 @@ mod tests {
             .enumerate()
             .map(|(i, &b)| (b as u64) << (i * 8))
             .sum();
-        let val = tag.as_atom().unwrap().as_u64().unwrap();
+        let space = stack.noun_space();
+        let val = tag.in_space(&space).as_atom().unwrap().as_u64().unwrap();
         assert_eq!(val, expected);
     }
 
@@ -281,7 +295,8 @@ mod tests {
     fn empty_atom() {
         let mut stack = new_stack();
         let noun = make_atom(&mut stack, &[]);
-        assert_eq!(noun.as_atom().unwrap().as_u64().unwrap(), 0);
+        let space = stack.noun_space();
+        assert_eq!(noun.in_space(&space).as_atom().unwrap().as_u64().unwrap(), 0);
     }
 
     #[test]
@@ -290,8 +305,9 @@ mod tests {
         // [1 [2 [3 0]]]
         let items = [D(1), D(2), D(3)];
         let list = make_list(&mut stack, &items);
+        let space = stack.noun_space();
 
-        let c1 = list.as_cell().unwrap();
+        let c1 = list.in_space(&space).as_cell().unwrap();
         assert_eq!(c1.head().as_atom().unwrap().as_u64().unwrap(), 1);
 
         let c2 = c1.tail().as_cell().unwrap();
@@ -308,7 +324,8 @@ mod tests {
     fn empty_list() {
         let mut stack = new_stack();
         let list = make_list(&mut stack, &[]);
-        assert_eq!(list.as_atom().unwrap().as_u64().unwrap(), 0);
+        let space = stack.noun_space();
+        assert_eq!(list.in_space(&space).as_atom().unwrap().as_u64().unwrap(), 0);
     }
 
     #[test]
@@ -341,8 +358,10 @@ mod tests {
         let mut stack = new_stack();
         let bytes = jam_to_bytes(&mut stack, D(42));
         let rejammed = rejam_atom(&bytes);
-        let cued = cue_from_bytes(&mut new_stack(), &rejammed).expect("rejam output cues");
-        assert_eq!(cued.as_atom().unwrap().as_u64().unwrap(), 42);
+        let mut s2 = new_stack();
+        let cued = cue_from_bytes(&mut s2, &rejammed).expect("rejam output cues");
+        let space = s2.noun_space();
+        assert_eq!(cued.in_space(&space).as_atom().unwrap().as_u64().unwrap(), 42);
     }
 
     #[test]
@@ -353,7 +372,8 @@ mod tests {
         let rejammed = rejam_atom(&bytes);
         let mut s2 = new_stack();
         let cued = cue_from_bytes(&mut s2, &rejammed).expect("rejam output cues");
-        let c1 = cued.as_cell().unwrap();
+        let space = s2.noun_space();
+        let c1 = cued.in_space(&space).as_cell().unwrap();
         assert_eq!(c1.head().as_atom().unwrap().as_u64().unwrap(), 1);
         let c2 = c1.tail().as_cell().unwrap();
         assert_eq!(c2.head().as_atom().unwrap().as_u64().unwrap(), 2);
@@ -372,11 +392,13 @@ mod tests {
         // Both jams cue back to the same atom value.
         let mut s2 = new_stack();
         let original = cue_from_bytes(&mut s2, &bytes).expect("original cues");
+        let space2 = s2.noun_space();
         let mut s3 = new_stack();
         let canonical = cue_from_bytes(&mut s3, &rejammed).expect("rejam cues");
+        let space3 = s3.noun_space();
         assert_eq!(
-            original.as_atom().unwrap().as_ne_bytes(),
-            canonical.as_atom().unwrap().as_ne_bytes(),
+            original.in_space(&space2).as_atom().unwrap().as_ne_bytes(),
+            canonical.in_space(&space3).as_atom().unwrap().as_ne_bytes(),
         );
     }
 
