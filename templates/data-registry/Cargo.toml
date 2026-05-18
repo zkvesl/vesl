@@ -16,3 +16,6 @@ nockvm_macros = { path = "../../../nockchain/crates/nockvm/rust/nockvm_macros" }
 
 tokio = { version = "1.32", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0"
+
+[patch.crates-io]
+ibig = { path = "../../../nockchain/crates/nockvm/rust/ibig" }

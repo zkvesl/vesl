@@ -7,7 +7,7 @@ use nockapp::kernel::boot;
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::{SystemWire, Wire};
 use nockapp::NockApp;
-use nockvm::noun::{D, T};
+use nockvm::noun::{D, T, NounAllocator};
 use nockvm_macros::tas;
 
 #[tokio::main]
@@ -97,7 +97,8 @@ fn print_effects(effects: &[NounSlab], label: &str) {
     }
     for effect in effects.iter() {
         let noun = unsafe { effect.root() };
-        if let Ok(cell) = noun.as_cell() {
+        let space = effect.noun_space();
+        if let Ok(cell) = noun.in_space(&space).as_cell() {
             if let Ok(tag) = cell.head().as_atom() {
                 let tag_bytes = tag.as_ne_bytes();
                 let tag_str = std::str::from_utf8(tag_bytes)

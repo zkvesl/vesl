@@ -14,7 +14,7 @@ fn main() {
 
     if Path::new(hoon_app_file).exists() {
         let output = Command::new("hoonc")
-            .args(&[hoon_app_file, "--output", &format!("{}/app.nock", out_dir)])
+            .args([hoon_app_file, "--output", &format!("{}/app.nock", out_dir)])
             .output();
 
         match output {
