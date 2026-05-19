@@ -95,13 +95,11 @@ impl Guard {
 
     /// Verify a full manifest (all chunks + prompt integrity).
     ///
-    /// Mirrors rag-logic.hoon ++verify-manifest:
-    /// 1. For each retrieval, verify chunk proof against root
-    /// 2. Collect chunk dats in order
-    /// 3. Reconstruct prompt: query + "\n" + chunk0.dat + "\n" + chunk1.dat + ...
-    /// 4. Compare reconstructed prompt to manifest.prompt byte-for-byte
-    ///
-    /// Returns true only if all chunks verify AND prompt matches reconstruction.
+    /// Mirrors rag-logic.hoon ++verify-manifest: verify each chunk proof
+    /// against the root, then reconstruct the prompt as
+    /// `query + "\n" + chunk0.dat + "\n" + chunk1.dat + ...` and compare
+    /// byte-for-byte. Returns true only if all chunks verify AND the
+    /// prompt matches the reconstruction.
     pub fn check_manifest(&self, manifest: &Manifest, root: &Tip5Hash) -> bool {
         self.validate_manifest(manifest, root).is_ok()
     }
@@ -221,7 +219,7 @@ mod tests {
     fn check_valid_proof() {
         let (mint, root, _chunks) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         let proof = mint.proof(0).unwrap();
         assert!(guard.check(b"The fund returned 12% YTD.", &proof, &root));
@@ -240,7 +238,7 @@ mod tests {
     fn check_tampered_data_fails() {
         let (mint, root, _chunks) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         let proof = mint.proof(0).unwrap();
         assert!(!guard.check(b"TAMPERED DATA", &proof, &root));
@@ -250,7 +248,7 @@ mod tests {
     fn check_manifest_valid() {
         let (mint, root, chunks) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         let retrievals: Vec<Retrieval> = chunks
             .iter()
@@ -287,7 +285,7 @@ mod tests {
     fn check_manifest_tampered_prompt_fails() {
         let (mint, root, chunks) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         let retrievals: Vec<Retrieval> = chunks
             .iter()
@@ -317,7 +315,7 @@ mod tests {
     fn check_manifest_bad_proof_fails() {
         let (mint, root, _chunks) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         // Use proof from leaf 0 but claim it's for different data
         let bad_retrieval = Retrieval {
@@ -346,7 +344,7 @@ mod tests {
         let root: Tip5Hash = [1, 2, 3, 4, 5];
 
         assert!(!guard.is_registered(&root));
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
         assert!(guard.is_registered(&root));
     }
 
@@ -367,7 +365,7 @@ mod tests {
     fn check_with_reason_bad_proof() {
         let (_, root, _) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
         let err = guard
             .check_with_reason(b"TAMPERED", &[], &root)
             .unwrap_err();
@@ -378,7 +376,7 @@ mod tests {
     fn check_with_reason_valid() {
         let (mint, root, _) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
         let proof = mint.proof(0).unwrap();
         assert!(guard
             .check_with_reason(b"The fund returned 12% YTD.", &proof, &root)
@@ -419,7 +417,7 @@ mod tests {
     fn validate_manifest_duplicate_chunk_ids() {
         let (mint, root, chunks) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         let mut retrievals: Vec<Retrieval> = chunks
             .iter()
@@ -452,7 +450,7 @@ mod tests {
     fn validate_manifest_prompt_mismatch() {
         let (mint, root, chunks) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         let retrievals: Vec<Retrieval> = chunks
             .iter()
@@ -483,7 +481,7 @@ mod tests {
     fn validate_manifest_empty_results() {
         let (_, root, _) = build_test_scenario();
         let mut guard = Guard::new();
-        guard.register_root(root);
+        guard.register_root(root).unwrap();
 
         let manifest = Manifest {
             query: "q".into(),

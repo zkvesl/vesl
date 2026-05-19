@@ -20,6 +20,7 @@
 ::
 /-  *vesl
 /+  *rag-logic
+/+  *kernel-arms
 /=  *  /common/wrapper
 ::
 =>
@@ -76,13 +77,9 @@
       ::  %register — store hull root
       ::
         %register
-      ::  Guard: reject re-registration (hull already has a root)
-      ::
-      ?:  (~(has by registered.state) hull.u.act)
-        ~>  %slog.[3 'settle: hull already registered']
-        [~ state]
-      =/  new-reg  (~(put by registered.state) hull.u.act root.u.act)
-      :_  state(registered new-reg)
+      =/  res  (handle-register registered.state hull.u.act root.u.act 'settle:')
+      ?~  res  [~ state]
+      :_  state(registered u.res)
       ^-  (list effect)
       ~[[%registered hull.u.act root.u.act]]
       ::
@@ -90,23 +87,15 @@
       ::    Guards: root must be registered, note ID must not be settled
       ::
         %settle
-      =/  raw=*  (cue payload.u.act)
-      =/  args=settlement-payload  ;;(settlement-payload raw)
-      ::  Guard: reject unregistered roots
-      ::
-      ?.  (~(has by registered.state) hull.note.args)
-        ~>  %slog.[3 'settle: root not registered']
-        [~ state]
-      ::  Guard: expected root must match registered root
-      ::
-      ?.  =(expected-root.args (~(got by registered.state) hull.note.args))
-        ~>  %slog.[3 'settle: root mismatch']
-        [~ state]
-      ::  Guard: reject duplicate note IDs (replay protection)
-      ::
-      ?:  (~(has in settled.state) id.note.args)
-        ~>  %slog.[3 'settle: note already settled (replay rejected)']
-        [~ state]
+      =/  parsed  (parse-payload payload.u.act)
+      ?~  parsed
+        ~>  %slog.[3 'settle: malformed settle payload']
+        :_  state
+        ^-  (list effect)
+        ~[[%settle-error 'settle: malformed payload']]
+      =/  res  (validate-settlement-args u.parsed registered.state settled.state %mutate 'settle:')
+      ?:  ?=(%.n -.res)  [~ state]
+      =/  args=settlement-payload  args.res
       =/  result  (settle-note note.args mani.args expected-root.args)
       =/  new-settled  (~(put in settled.state) id.note.args)
       :_  state(settled new-settled)
@@ -116,18 +105,17 @@
       ::  %verify — verify manifest (read-only, no state change)
       ::
         %verify
-      =/  raw=*  (cue payload.u.act)
-      =/  args=settlement-payload  ;;(settlement-payload raw)
-      ?.  (~(has by registered.state) hull.note.args)
+      =/  parsed  (parse-payload payload.u.act)
+      ?~  parsed
         :_  state
         ^-  (list effect)
         ~[[%verified %.n]]
-      ::  Guard: expected root must match registered root
-      ::
-      ?.  =(expected-root.args (~(got by registered.state) hull.note.args))
+      =/  res  (validate-settlement-args u.parsed registered.state settled.state %verify 'settle:')
+      ?:  ?=(%.n -.res)
         :_  state
         ^-  (list effect)
         ~[[%verified %.n]]
+      =/  args=settlement-payload  args.res
       =/  ok=?  (verify-manifest mani.args expected-root.args)
       :_  state
       ^-  (list effect)

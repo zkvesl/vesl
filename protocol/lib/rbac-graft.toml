@@ -1,0 +1,71 @@
+# rbac-graft manifest — pubkey-keyed permission table.
+#
+# Priority 80, fourth graft in the 50–99 state-graft band.
+# `after = ["queue-graft"]` keeps state-band ordering explicit.
+#
+# Two poke arms (causes carry `(list @t)` for Rust API shape; the
+# graft `silt`s into the internal `(set @t)` on the way in):
+#   %rbac-grant  — union with held perms; surfaces added (set diff)
+#                  in the effect rather than the full perms set.
+#   %rbac-revoke — intersect-then-noop on unheld perms; auto-clears
+#                  the pubkey from the roles map when remaining
+#                  perms drop to zero.
+#
+# Two-level capacity guards: outer roles-cap (10M) and inner
+# perms-per-role-cap (1k). Without the inner cap a single pubkey
+# can fan out unbounded perms.
+#
+# Peek paths:
+#   [%rbac-perm-count pubkey=@]        - count of held perms
+#   [%rbac-has-perm pubkey=@ perm=@t]  - membership check (loobean)
+#
+# No C1 mule-wrap site: pubkey, perm names, and perm lists arrive
+# as typed atoms / cords / list cells in the cause. No `cue` of
+# caller-supplied bytes inside the poke body.
+
+[graft]
+name     = "rbac-graft"
+version  = "0.1.0"
+priority = 80
+after    = ["queue-graft"]
+
+[graft.types]
+effect = "rbac-effect"
+cause  = "rbac-cause"
+
+[graft.blocks.imports]
+sentinel = "*rbac-graft"
+body     = """
+/+  *rbac-graft"""
+
+[graft.blocks.state]
+sentinel = "rbac=rbac-state"
+body     = "rbac=rbac-state"
+
+[graft.blocks.cause]
+sentinel = "rbac-cause"
+body     = "rbac-cause"
+
+[graft.blocks.poke]
+sentinel = "%rbac-grant"
+body     = """
+::
+  %rbac-grant
+=/  lc=rbac-cause  [%rbac-grant pubkey.u.act perms.u.act]
+=/  [efx=(list rbac-effect) new-rbac=rbac-state]
+  (rbac-poke rbac.state lc)
+:_  state(rbac new-rbac)
+^-  (list effect)
+efx
+::
+  %rbac-revoke
+=/  lc=rbac-cause  [%rbac-revoke pubkey.u.act perms.u.act]
+=/  [efx=(list rbac-effect) new-rbac=rbac-state]
+  (rbac-poke rbac.state lc)
+:_  state(rbac new-rbac)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "rbac-peek"
+body     = "(rbac-peek rbac.state path)"

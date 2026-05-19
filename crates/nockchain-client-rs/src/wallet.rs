@@ -122,7 +122,7 @@ impl WalletClient {
         match self.client.peek(pid, path).await {
             Ok(_) => Ok(true),
             Err(nockapp_grpc::NockAppGrpcError::Internal(_)) => {
-                // Wallet responded with an error — gRPC server is alive
+                // Wallet returned an app-level error — gRPC server is alive.
                 Ok(true)
             }
             Err(e) => Err(anyhow::anyhow!("wallet not responsive: {e:?}")),

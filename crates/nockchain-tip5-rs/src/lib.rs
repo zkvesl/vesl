@@ -128,13 +128,28 @@ pub fn tip5_to_atom_le_bytes(hash: &Tip5Hash) -> Vec<u8> {
 ///
 /// Mirrors Hoon's `+split-to-belts`: `(end [3 7] a)` / `(rsh [3 7] a)` loop.
 /// 7 bytes = 56 bits -> max value 2^56 - 1 ~ 7.2e16 < PRIME ~ 1.8e19.
+///
+/// # Trailing-zero normalization (AUDIT 2026-04-17 L-07)
+///
+/// Input bytes are the little-endian form of a Hoon atom (bignum).
+/// Trailing zero bytes are **stripped** via `rposition` before
+/// chunking — matching Hoon's bignum form, where `0x05` and
+/// `0x05 00 00` are the same value. Both sides of the cross-VM
+/// boundary (this function and the Hoon `split-to-belts` in
+/// `protocol/lib/vesl-merkle.hoon`) normalize identically, so the hash
+/// of `"x"`, `"x\0"`, and `"x\0\0\0"` are all equal.
+///
+/// Callers that treat byte-length as distinguishing between
+/// logically-distinct payloads **will see hash collisions**. Fix:
+/// encode length into the payload explicitly — e.g. prepend a 4-byte
+/// length field, or add a domain-separating prefix before hashing.
 fn atom_bytes_to_belts(bytes: &[u8]) -> Vec<Belt> {
     let len = bytes.iter().rposition(|&b| b != 0).map_or(0, |p| p + 1);
     if len == 0 {
         return vec![Belt(0)];
     }
     let bytes = &bytes[..len];
-    let mut belts = Vec::with_capacity((len + 6) / 7);
+    let mut belts = Vec::with_capacity(len.div_ceil(7));
     for chunk in bytes.chunks(7) {
         let mut val: u64 = 0;
         for (i, &b) in chunk.iter().enumerate() {
@@ -173,8 +188,15 @@ pub fn hash_pair(l: &Tip5Hash, r: &Tip5Hash) -> Tip5Hash {
 ///   `side=true`  -> sibling is LEFT  -> `hash_pair(sibling, current)`
 ///   `side=false` -> sibling is RIGHT -> `hash_pair(current, sibling)`
 pub fn verify_proof(leaf_data: &[u8], proof: &[ProofNode], expected_root: &Tip5Hash) -> bool {
-    // Depth guard: match Hoon's 64-node limit
+    // Depth guard: match Hoon's 64-node limit.
+    // AUDIT 2026-04-17 L-01: a silent `false` here is indistinguishable
+    // from "wrong proof" at the caller — warn so oversize proofs
+    // surface in logs instead of looking like generic failures.
     if proof.len() > 64 {
+        tracing::warn!(
+            proof_depth = proof.len(),
+            "verify_proof: proof exceeds 64-node cap (matches Hoon's verify-chunk), rejecting"
+        );
         return false;
     }
 
@@ -218,7 +240,7 @@ impl MerkleTree {
         let mut levels = vec![current.clone()];
 
         while current.len() > 1 {
-            if current.len() % 2 != 0 {
+            if !current.len().is_multiple_of(2) {
                 let last = *current.last().unwrap();
                 current.push(last);
             }
@@ -257,7 +279,7 @@ impl MerkleTree {
         let mut idx = index;
 
         for level in &self.levels[..self.levels.len() - 1] {
-            let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+            let sibling_idx = if idx.is_multiple_of(2) { idx + 1 } else { idx - 1 };
 
             let sibling_hash = if sibling_idx < level.len() {
                 level[sibling_idx]

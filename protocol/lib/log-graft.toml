@@ -1,0 +1,66 @@
+# log-graft manifest — append-only audit trail.
+#
+# Priority 130, second graft in the 100–149 behavior-graft band. Pairs
+# with clock-graft (140) as the additive pilots of Phase 03 — pure
+# observers with no wrapping semantics, so they ship under the
+# existing graft-inject markers (no prelude/postlude needed).
+#
+# One poke arm:
+#   %log-append  — prepend an entry to the head of the log. Body is
+#                  jammed by the caller; the kernel cue's inside a
+#                  mule, so malformed jam surfaces as %log-error
+#                  rather than a kernel panic. Newest entries are at
+#                  the head; oldest evicted past retention.
+#
+# Peek paths:
+#   [%log-by-seq seq=@ud ~] — lookup by monotonic sequence number.
+#                             O(retention), bounded.
+#   [%log-tail count=@ud ~] — first N entries (newest first).
+#   [%log-len ~]            — current entry count.
+#
+# Append-only by design: no %log-clear, no %log-delete. An audit log
+# that callers can rewrite is not an audit log.
+#
+# Retention is hardcoded at 100k for v0.1. The .dev/03 doc plans it as
+# manifest config; that requires a graft-inject feature to propagate
+# TOML constants into .hoon source — separate from prelude/postlude
+# work in 03b. Promote later if retention tuning becomes a real ask.
+
+[graft]
+name     = "log-graft"
+version  = "0.1.0"
+priority = 130
+after    = []
+
+[graft.types]
+effect = "log-effect"
+cause  = "log-cause"
+
+[graft.blocks.imports]
+sentinel = "*log-graft"
+body     = """
+/+  *log-graft"""
+
+[graft.blocks.state]
+sentinel = "log=log-state"
+body     = "log=log-state"
+
+[graft.blocks.cause]
+sentinel = "log-cause"
+body     = "log-cause"
+
+[graft.blocks.poke]
+sentinel = "%log-append"
+body     = """
+::
+  %log-append
+=/  lc=log-cause  [%log-append tag.u.act payload.u.act]
+=/  [efx=(list log-effect) new-log=log-state]
+  (log-poke log.state lc)
+:_  state(log new-log)
+^-  (list effect)
+efx"""
+
+[graft.blocks.peek]
+sentinel = "log-peek"
+body     = "(log-peek log.state path)"

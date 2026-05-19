@@ -1,5 +1,11 @@
 ::  protocol/lib/vesl-entrypoint.hoon: ABI Boundary for the Vesl ZK-Prover
 ::
+::  STAGED: canonical ABI placeholder. Imported only by
+::  protocol/tests/{cross-vm,test-entrypoint}.hoon today; no shipped
+::  kernel composes it yet. Kept here so future kernel work can adopt
+::  the entrypoint shape without re-deriving it. See README "Graft
+::  catalog" for the support-library status note.
+::
 ::  Universal entrypoint gate. Accepts a single jammed atom (@)
 ::  from the off-chain Rust Hull, deserializes via cue, validates
 ::  via strict mold (;;), and runs settlement logic.

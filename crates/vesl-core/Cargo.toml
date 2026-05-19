@@ -1,9 +1,9 @@
 [package]
 name = "vesl-core"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2024"
 description = "High-level Vesl SDK — Mint/Guard/Settle/Forge facades over the extracted crate stack"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Sibling extracted crates
@@ -11,7 +11,31 @@ nockchain-tip5-rs = { path = "../nockchain-tip5-rs", features = ["serde"] }
 nock-noun-rs = { path = "../nock-noun-rs" }
 nockchain-client-rs = { path = "../nockchain-client-rs" }
 
-# Nockchain monorepo crates
+# Canonical Schnorr-over-Cheetah signing — lifted out of x402-nockchain-crypto
+# in Phase 0 W1-3 (per
+# `vesl-labs/docs/plans/shared-infrastructure/10-PHASE-0-NOW.md`).
+# `crates/vesl-core/src/signing.rs` is now a backwards-compat shim
+# that delegates to vesl-signing; existing API ([Belt; 8]-flavored
+# `derive_pubkey`/`sign`/`key_from_seed_phrase`) is preserved.
+# Path dep during local development; switch to git-dep with v0.1.0
+# once the vesl-wallet repo cuts v0.1.0.
+vesl-signing = { path = "../../../vesl-wallet/crates/vesl-signing", default-features = false }
+
+# Vesl wallet derivation spec — doc-only crate exposing role constants
+# + `DerivationPath`. No derivation logic — that lives in `vesl-wallet`.
+# Path-dep during local development; switch to git-dep with v0.1.0
+# alongside vesl-signing once end-to-end verification ships.
+vesl-wallet-spec = { path = "../../../vesl-wallet/crates/vesl-wallet-spec", default-features = false }
+
+# Vesl wallet — high-level Hull-author API: BIP-39 mnemonic + custom
+# Cheetah-BIP32-over-Tip5 HD derivation, with per-role convenience
+# signers driven by `vesl-wallet-spec` constants. Provides the canonical
+# `key_from_seed_phrase` implementation that the local signing shim now
+# delegates to. Path-dep during local development; switch to git-dep
+# with v0.1.0 once the vesl-wallet repo cuts v0.1.0.
+vesl-wallet = { path = "../../../vesl-wallet/crates/vesl-wallet", default-features = false }
+
+# Nockchain monorepo crates — path-dep to sibling ../nockchain clone.
 nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }
 nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
 nockchain-math = { path = "../../../nockchain/crates/nockchain-math" }

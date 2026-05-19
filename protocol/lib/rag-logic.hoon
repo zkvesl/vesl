@@ -14,14 +14,39 @@
 ::  Newline separator (byte 0xa) ensures collision-resistant
 ::  reconstruction. Tail-recursive.
 ::
+::  AUDIT 2026-04-17 M-05: belt-and-suspenders size cap. The Rust
+::  hull caps JSON body at 4 MB and manifest total at 10 MB, but a
+::  direct poke bypasses those guards. Refuse reconstruction once
+::  the built prompt exceeds 10 MB — matches the Rust cap — so the
+::  Hoon path has its own ceiling and callers can't crash the
+::  Nock stack by handing the kernel a giant manifest.
+::
 ++  build-prompt
   |=  [query=@t dats=(list @t)]
   ^-  @t
   =/  built=@t  query
   =/  sep  10
+  =/  max-bytes=@  ^~((mul 10.000 1.000))
+  ::  AUDIT 2026-04-19 M-12: reject on cumulative OR single-chunk
+  ::  oversize BEFORE `cat` allocates. The prior post-concat check
+  ::  still built the full atom first, so a single attacker chunk with
+  ::  size > max-bytes could OOM the Nock stack before `met` ran.
+  ::
+  ?:  (gth (met 3 built) max-bytes)
+    ~|  %vesl-prompt-too-large
+    !!
   |-
   ?~  dats
     built
+  ?:  (gth (met 3 i.dats) max-bytes)
+    ~|  %vesl-prompt-chunk-too-large
+    !!
+  ::  +1 for sep, +1 more is a loose upper bound for `met` of the
+  ::  concatenated atom — cheap to check, avoids any overflow surprise.
+  ::
+  ?:  (gth (add (met 3 built) (met 3 i.dats)) (sub max-bytes 2))
+    ~|  %vesl-prompt-too-large
+    !!
   =/  nex=@t  `@t`(cat 3 (cat 3 built sep) i.dats)
   $(built nex, dats t.dats)
 ::

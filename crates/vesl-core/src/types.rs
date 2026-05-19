@@ -12,8 +12,13 @@ pub use nockchain_tip5_rs::{
 // Chain/wallet clients (for Settle/Forge users)
 pub use nockchain_client_rs::{ChainClient, ChainConfig, WalletClient, WalletConfig};
 
-// Noun building (for IntentVerifier trait)
-pub use nock_noun_rs::NounSlab;
+// Noun building. Re-exported as a type alias with the default jammer
+// bound. The underlying `nockapp::NounSlab` is generic over `J: Jammer`;
+// rustc can't always infer the default inside closures, so consumers
+// writing `let mut s = NounSlab::new();` need no annotation. Internal
+// vesl-core callers still import via `nock_noun_rs::NounSlab` (same
+// underlying type).
+pub type NounSlab = nockapp::noun::slab::NounSlab<nockapp::noun::slab::NockJammer>;
 
 // Vesl domain types — mirrors of sur/vesl.hoon
 use serde::{Deserialize, Serialize};
@@ -68,7 +73,7 @@ pub struct Note {
     pub state: NoteState,
 }
 
-/// Generic settlement payload — mirrors graft-payload in vesl-graft.hoon.
+/// Generic settlement payload — mirrors graft-payload in settle-graft.hoon.
 /// For RAG, `data` is the serialized manifest. For other domains, whatever
 /// the verification gate expects.
 #[derive(Debug, Clone)]
@@ -78,26 +83,28 @@ pub struct GraftPayload {
     pub expected_root: Tip5Hash,
 }
 
-/// A leaf with its Merkle inclusion proof — generic payload unit for Forge.
-/// Mirrors Hoon: `[dat=@ proof=(list [hash=@ side=?])]`
-#[derive(Debug, Clone)]
-pub struct LeafWithProof {
-    pub dat: Vec<u8>,
-    pub proof: Vec<ProofNode>,
-}
-
-/// Generic STARK proof payload — mirrors forge-kernel.hoon's forge-payload.
-/// `[note leaves expected-root]` where leaves carry their own Merkle proofs.
-#[derive(Debug, Clone)]
-pub struct ForgePayload {
-    pub note: Note,
-    pub leaves: Vec<LeafWithProof>,
-    pub expected_root: Tip5Hash,
-}
-
-/// Domain verification trait. Implement for your computation type.
+/// Commitment verification trait. Implement for your computation type.
 /// `RagVerifier` is the built-in implementation for RAG manifests.
-pub trait IntentVerifier: Send + Sync {
-    fn verify(&self, data: &[u8], expected_root: &Tip5Hash) -> bool;
+///
+/// Decides whether `data` binds to `expected_root` under a domain-specific
+/// rule (for RAG: manifest chunks prove into the merkle root; for other
+/// domains: whatever the commitment gate demands). This is commitment-layer
+/// plumbing — it has nothing to do with intent coordination despite the
+/// legacy `IntentVerifier` name retained as a deprecated alias below.
+///
+/// AUDIT 2026-04-17 H-03: `verify` takes `note_id` so domain verifiers
+/// can enforce `note_id == deterministic_fn(data)`, closing the
+/// pre-commit race where an attacker predicts a victim's note-id and
+/// settles a different manifest under it first. Implementations that
+/// don't care about note-id binding can simply ignore the argument.
+pub trait CommitmentVerifier: Send + Sync {
+    fn verify(&self, note_id: u64, data: &[u8], expected_root: &Tip5Hash) -> bool;
     fn build_settle_poke(&self, payload: &GraftPayload) -> anyhow::Result<NounSlab>;
 }
+
+/// Deprecated alias for `CommitmentVerifier`. The original name conflated
+/// intent coordination with commitment verification — see
+/// `.dev/BIFURCATE_INTENT.md` and `.dev/GRAFT_REFACTOR.md` for the taxonomy
+/// cleanup. Will be removed in the next minor release.
+#[deprecated(note = "renamed to CommitmentVerifier; IntentVerifier will be removed in the next minor release")]
+pub use self::CommitmentVerifier as IntentVerifier;

@@ -10,7 +10,7 @@ use nockapp::NockApp;
 use nockchain_types::tx_engine::common::{Hash, Nicks};
 use nockchain_types::tx_engine::v1::tx::{Seeds, Spends};
 use nockvm::ext::make_tas;
-use nockvm::noun::{IndirectAtom, D, T};
+use nockvm::noun::{IndirectAtom, NounAllocator, D, T};
 use noun_serde::{NounDecode, NounEncode};
 
 // ---------------------------------------------------------------------------
@@ -119,31 +119,40 @@ pub fn jam_spends_manual(spends: &Spends) -> anyhow::Result<bytes::Bytes> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Dereference a NounSlab's root noun (C-001).
-///
-/// Centralizes the unsafe dereference. The caller must ensure the slab's
-/// root was populated (via `set_root`, `cue_into`, or `NockApp::poke`).
-fn slab_root(slab: &NounSlab) -> nockvm::noun::Noun {
-    // SAFETY: root() returns &Noun. We copy the Noun (which is Copy).
-    // The slab must outlive any indirect atoms — true for all call sites
-    // in this module since we consume the Noun before the slab drops.
-    unsafe { *slab.root() }
-}
+use nock_noun_rs::slab_root;
 
-/// Extract a Hash from a kernel effect of shape `[%tag hash-noun]`.
+/// Extract a Hash from a kernel effect of shape `[%expected_tag hash-noun]`.
+///
+/// Verifies the first effect's head tag matches `expected_tag` via
+/// [`crate::peek::effect_head_tag`] before decoding the hash from the
+/// cell's tail. Returns an error if no effects were emitted, the first
+/// effect isn't a cell with an atom head, the head tag doesn't match,
+/// or the tail isn't a valid `Hash` noun.
 pub fn extract_hash_from_effect(effects: &[NounSlab], expected_tag: &str) -> anyhow::Result<Hash> {
     let effect_slab = effects
         .first()
         .ok_or_else(|| anyhow::anyhow!("no effects returned from %{expected_tag} poke"))?;
 
-    let root = slab_root(effect_slab);
-    let cell = root
-        .as_cell()
-        .map_err(|_| anyhow::anyhow!("{expected_tag} effect is not a cell"))?;
+    match crate::peek::effect_head_tag(effect_slab) {
+        Some(tag) if tag == expected_tag => {}
+        Some(tag) => {
+            anyhow::bail!("expected %{expected_tag} effect, got %{tag}");
+        }
+        None => {
+            anyhow::bail!("{expected_tag} effect is not a cell with an atom head");
+        }
+    }
 
-    // The hash is the tail (head is the tag atom)
-    let hash_noun = cell.tail();
-    Hash::from_noun(&hash_noun).map_err(|e| anyhow::anyhow!("{expected_tag} hash decode: {e}"))
+    // SAFETY-of-shape: effect_head_tag confirmed the slab is a cell.
+    let root = slab_root(effect_slab);
+    let space = effect_slab.noun_space();
+    let cell = root
+        .in_space(&space)
+        .as_cell()
+        .expect("effect_head_tag verified cell shape");
+    let hash_noun = cell.tail().noun();
+    Hash::from_noun(&hash_noun, &space)
+        .map_err(|e| anyhow::anyhow!("{expected_tag} hash decode: {e}"))
 }
 
 /// Convert a byte slice (JAM'd output) to a Nock atom.
@@ -155,7 +164,8 @@ pub fn bytes_to_atom(slab: &mut NounSlab, bytes: &[u8]) -> nockvm::noun::Noun {
     // of this call. new_raw_bytes_ref copies into the slab allocator.
     unsafe {
         let mut indirect = IndirectAtom::new_raw_bytes_ref(slab, bytes);
-        indirect.normalize_as_atom().as_noun()
+        let space = slab.noun_space();
+        indirect.normalize_as_atom(&space).as_noun()
     }
 }
 

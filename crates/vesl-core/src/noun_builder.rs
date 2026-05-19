@@ -123,15 +123,24 @@ mod tests {
 
     #[test]
     fn loobean_encoding() {
-        assert_eq!(make_loobean(true).as_atom().unwrap().as_u64().unwrap(), 0);
-        assert_eq!(make_loobean(false).as_atom().unwrap().as_u64().unwrap(), 1);
+        let stack = new_stack();
+        let space = stack.noun_space();
+        assert_eq!(
+            make_loobean(true).in_space(&space).as_atom().unwrap().as_u64().unwrap(),
+            0,
+        );
+        assert_eq!(
+            make_loobean(false).in_space(&space).as_atom().unwrap().as_u64().unwrap(),
+            1,
+        );
     }
 
     #[test]
     fn cord_encoding() {
         let mut stack = new_stack();
         let abc = make_cord(&mut stack, "abc");
-        let val = abc.as_atom().unwrap().as_u64().unwrap();
+        let space = stack.noun_space();
+        let val = abc.in_space(&space).as_atom().unwrap().as_u64().unwrap();
         assert_eq!(val, 97 + 98 * 256 + 99 * 65536);
     }
 
@@ -144,7 +153,8 @@ mod tests {
             .enumerate()
             .map(|(i, &b)| (b as u64) << (i * 8))
             .sum();
-        let val = tag.as_atom().unwrap().as_u64().unwrap();
+        let space = stack.noun_space();
+        let val = tag.in_space(&space).as_atom().unwrap().as_u64().unwrap();
         assert_eq!(val, expected);
     }
 
@@ -163,9 +173,10 @@ mod tests {
             },
         ];
         let list = proof_list_to_noun(&mut stack, &proof);
+        let space = stack.noun_space();
 
         assert!(list.is_cell(), "list must be a cell");
-        let first = list.as_cell().unwrap();
+        let first = list.in_space(&space).as_cell().unwrap();
         assert!(
             first.head().is_cell(),
             "first element must be a cell [hash side]"
@@ -185,8 +196,7 @@ mod tests {
     fn register_poke_is_cell() {
         let root: Tip5Hash = [1, 2, 3, 4, 5];
         let slab = build_register_poke(7, &root);
-        // C-001: centralized dereference
-        let root = unsafe { *slab.root() };
+        let root = nock_noun_rs::slab_root(&slab);
         assert!(root.is_cell(), "register poke must be a cell");
     }
 }

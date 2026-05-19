@@ -6,3 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "Vesl Mint kernel JAM — commitment only (1.5MB)"
 
 [dependencies]
+sha2 = "0.10"
+
+[build-dependencies]
+sha2 = "0.10"

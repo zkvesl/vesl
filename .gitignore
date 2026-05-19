@@ -1,17 +1,19 @@
 # Build artifacts
+/target/
 hull/target/
-hull-rag/target/
 kernels/*/target/
 kernels/*/Cargo.lock
 templates/*/target/
+templates/*/app.nock
 crates/*/target/
 out.jam
 *.jam.bak
 
 # Runtime state
-.fakenet/
-hull-rag/.data.vesl/
+hull/.data.vesl/
+.data.*/
 *.pid
+.fakenet/
 
 # Internal
 .dev/

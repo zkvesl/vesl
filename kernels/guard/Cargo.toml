@@ -6,3 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "Vesl Guard kernel JAM — commitment + verification (1.5MB)"
 
 [dependencies]
+sha2 = "0.10"
+
+[build-dependencies]
+sha2 = "0.10"

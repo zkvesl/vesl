@@ -12,6 +12,7 @@
 ::  Output:   assets/mint.jam
 ::
 /+  *vesl-mint
+/+  *kernel-arms
 /=  *  /common/wrapper
 ::
 =>
@@ -62,13 +63,9 @@
       ::  %register — store hull root
       ::
         %register
-      ::  Guard: reject re-registration (hull already has a root)
-      ::
-      ?:  (~(has by registered.state) hull.u.act)
-        ~>  %slog.[3 'mint: hull already registered']
-        [~ state]
-      =/  new-reg  (~(put by registered.state) hull.u.act root.u.act)
-      :_  state(registered new-reg)
+      =/  res  (handle-register registered.state hull.u.act root.u.act 'mint:')
+      ?~  res  [~ state]
+      :_  state(registered u.res)
       ^-  (list effect)
       ~[[%registered hull.u.act root.u.act]]
       ::

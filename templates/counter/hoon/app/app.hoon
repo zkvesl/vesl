@@ -66,7 +66,7 @@
     ^-  [(list effect) _state]
     =/  act  ((soft cause) cause.input.ovum)
     ?~  act
-      ~>  %slog.[3 'counter: invalid cause']
+      ~>  %slog.[1 'counter: invalid cause']
       [~ state]
     ?-  -.u.act
       ::

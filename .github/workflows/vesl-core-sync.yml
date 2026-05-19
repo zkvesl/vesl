@@ -1,0 +1,48 @@
+name: vesl-core ↔ vesl-nockup sync
+
+# Asserts that vesl-nockup/crates/* is a byte-mirror of vesl-core/crates/*.
+# vesl-nockup's sync.sh is the mechanism that maintains this invariant; this
+# workflow catches "fixed in vesl-core, forgot to run sync.sh" drift on PRs
+# that touch crates/.
+#
+# Runs on PRs that modify crates/* and on pushes to main/dev.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'crates/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+
+jobs:
+  diff-crates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout vesl-core
+        uses: actions/checkout@v4
+        with:
+          path: vesl-core
+
+      - name: Checkout vesl-nockup
+        uses: actions/checkout@v4
+        with:
+          repository: zkvesl/vesl-nockup
+          path: vesl-nockup
+
+      - name: Diff crates/ trees
+        run: |
+          # Any source difference fails the job. target/ is excluded because
+          # it's cargo build output, not part of the mirror contract.
+          #
+          # The expected fix is: run sync.sh in vesl-nockup and push the mirror
+          # in the same PR (or a follow-up) that lands the vesl-core change.
+          if ! diff -rq --exclude=target vesl-core/crates vesl-nockup/crates; then
+            echo ""
+            echo "vesl-core/crates and vesl-nockup/crates have drifted."
+            echo "Fix: cd vesl-nockup && ./sync.sh && commit the result."
+            exit 1
+          fi
+          echo "crates/ trees match."

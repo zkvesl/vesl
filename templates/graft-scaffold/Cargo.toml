@@ -1,3 +1,4 @@
+# ci: skip-template-check (path-deps require user fixup)
 [package]
 name = "my-nockapp"
 version = "0.1.0"
@@ -9,9 +10,10 @@ path = "src/main.rs"
 
 [dependencies]
 # NockVM — adjust paths to your nockchain clone
-nockapp = { path = "../../nockchain/crates/nockapp", default-features = false }
-nockvm = { path = "../../nockchain/crates/nockvm/rust/nockvm" }
-nockvm_macros = { path = "../../nockchain/crates/nockvm/rust/nockvm_macros" }
+nockapp = { path = "../../../nockchain/crates/nockapp", default-features = false }
+nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
+nockvm_macros = { path = "../../../nockchain/crates/nockvm/rust/nockvm_macros" }
+zkvm-jetpack = { path = "../../../nockchain/crates/zkvm-jetpack" }
 
 # Vesl SDK — adjust paths to your vesl clone
 vesl-core = { path = "../../crates/vesl-core" }
@@ -19,4 +21,17 @@ nock-noun-rs = { path = "../../crates/nock-noun-rs" }
 nockchain-tip5-rs = { path = "../../crates/nockchain-tip5-rs" }
 
 tokio = { version = "1.32", features = ["rt-multi-thread", "macros"] }
-anyhow = "1.0"
+
+# vesl-signing (pulled transitively via vesl-core) declares
+# `ibig = "0.3"` from crates.io. vesl-core's signing path uses the
+# nockvm-vendored ibig at ../../nockchain/crates/nockvm/rust/ibig.
+# Without this patch, Cargo treats the path-dep and crates.io as
+# distinct UBig types and `vesl-core::signing::ubig_to_belts8`
+# becomes uncallable. Mirrors `vesl-nockup/Cargo.toml:36-37`'s
+# workspace patch.
+#
+# Adjust the path if your scaffold is nested deeper than two levels
+# above your `nockchain/` clone (matches the existing
+# `nockapp = { path = "../../../nockchain/..." }` convention).
+[patch.crates-io]
+ibig = { path = "../../../nockchain/crates/nockvm/rust/ibig" }

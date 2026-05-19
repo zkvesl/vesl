@@ -1,0 +1,1 @@
+../../protocol/lib/validate-graft.hoon

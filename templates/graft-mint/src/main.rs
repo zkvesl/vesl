@@ -7,7 +7,7 @@ use nockapp::kernel::boot;
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::{SystemWire, Wire};
 use nockapp::NockApp;
-use nockvm::noun::{D, T};
+use nockvm::noun::{D, T, NounAllocator};
 use nockvm_macros::tas;
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         fs::read("out.jam").map_err(|e| format!("Failed to read out.jam: {}", e))?;
 
     let mut app: NockApp =
-        boot::setup(&kernel, cli, &[], "{{project_name}}", None).await?;
+        boot::setup(&kernel, cli, &[], "graft-mint", None).await?;
 
     // --- domain: store some notes ---
 
@@ -58,14 +58,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let hull_id: u64 = 1;
     {
         let mut slab = NounSlab::new();
-        let tag = make_tag_in(&mut slab, "vesl-register");
+        let tag = make_tag_in(&mut slab, "settle-register");
         let root_bytes = tip5_to_atom_le_bytes(&root);
         let root_atom = make_atom_in(&mut slab, &root_bytes);
         let poke = T(&mut slab, &[tag, D(hull_id), root_atom]);
         slab.set_root(poke);
 
         let effects = app.poke(SystemWire.to_wire(), slab).await?;
-        print_effects(&effects, "vesl-register");
+        print_effects(&effects, "settle-register");
     }
 
     // --- guard: verify proofs locally ---
@@ -101,7 +101,8 @@ fn print_effects(effects: &[NounSlab], label: &str) {
     }
     for effect in effects.iter() {
         let noun = unsafe { effect.root() };
-        if let Ok(cell) = noun.as_cell() {
+        let space = effect.noun_space();
+        if let Ok(cell) = noun.in_space(&space).as_cell() {
             if let Ok(tag) = cell.head().as_atom() {
                 let tag_bytes = tag.as_ne_bytes();
                 let tag_str = std::str::from_utf8(tag_bytes)

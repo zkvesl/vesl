@@ -5,7 +5,7 @@ use nockapp::kernel::boot;
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::{SystemWire, Wire};
 use nockapp::NockApp;
-use nockvm::noun::{D, T};
+use nockvm::noun::{NounAllocator, D, T};
 use nockvm_macros::tas;
 
 #[tokio::main]
@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|e| format!("Failed to read out.jam: {}", e))?;
 
     let mut app: NockApp =
-        boot::setup(&kernel, cli, &[], "{{project_name}}", None).await?;
+        boot::setup(&kernel, cli, &[], "counter", None).await?;
 
     // Increment 3 times
     for i in 0..3 {
@@ -51,7 +51,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 fn print_effects(effects: &[NounSlab], label: &str) {
     for effect in effects.iter() {
         let noun = unsafe { effect.root() };
-        if let Ok(cell) = noun.as_cell() {
+        let space = effect.noun_space();
+        if let Ok(cell) = noun.in_space(&space).as_cell() {
             if cell.head().eq_bytes(b"count") {
                 if let Ok(atom) = cell.tail().as_atom() {
                     println!("[{}] count = {}", label, atom.as_u64().unwrap_or(0));

@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vesl-core",
+    "crates/vesl-checkpoint",
+    "crates/nock-noun-rs",
+    "crates/nockchain-tip5-rs",
+    "crates/nockchain-client-rs",
+    "kernels/guard",
+    "kernels/mint",
+    "kernels/settle",
+]
+# Templates are independent Cargo packages — end-users copy one out and
+# build it standalone (see templates/<name>/README.md). They keep their
+# own Cargo.toml + Cargo.lock + rust-toolchain.toml; their path-deps
+# into ../../crates/ and ../../../nockchain/ resolve without workspace
+# context. `exclude` prevents cargo from auto-absorbing them.
+exclude = ["templates"]
+
+# No [workspace.dependencies] block. Members keep their own explicit
+# path-deps so each Cargo.toml stays a self-contained package manifest.
+# This matters for downstream repos (vesl-nockup, hull-llm) that sync or
+# patch individual member crates — they can consume a member's Cargo.toml
+# without needing vesl-core's workspace context. The workspace earns its
+# keep here by unifying Cargo.lock, target/, and toolchain — not by
+# centralizing dep declarations.
+
+# vesl-signing (Phase 0 W3 lift target, github.com/zkvesl/vesl-wallet)
+# declares `ibig = "0.3"` from crates.io. vesl-core uses the
+# nockchain-vendored `ibig` at `../nockchain/crates/nockvm/rust/ibig` —
+# same upstream (tczajka/ibig-rs v0.3.6), but Cargo treats path-dep and
+# crates.io as distinct, producing two `UBig` types in the dep graph.
+# Patching crates.io to the path-dep unifies them so the
+# `vesl-core::signing` shim's `[Belt; 8] ↔ UBig` conversion compiles.
+# Hardware-wallet vendors and external consumers who pull vesl-signing
+# WITHOUT vesl-core stay on crates.io ibig and are unaffected.
+[patch.crates-io]
+ibig = { path = "../nockchain/crates/nockvm/rust/ibig" }
+
+# Bypass the `is_in_frame` debug_assert! that fires on PMA-resolved pointers
+# post-PMA (upstream nockchain issue #121). Function logic returns false
+# correctly when the asserts are skipped; release mode is already clean.
+[profile.dev.package.nockvm]
+debug-assertions = false
+
+[profile.test.package.nockvm]
+debug-assertions = false

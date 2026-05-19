@@ -1,4 +1,4 @@
-//! Ergonomic Nock noun construction from Rust.
+//! High-level Nock noun construction from Rust.
 //!
 //! Provides helpers for building Nock nouns without wrestling the raw
 //! NockStack / NounSlab APIs directly. Covers the patterns every NockApp
@@ -22,11 +22,11 @@
 //!
 //! # Memory Model
 //!
-//! NockStack is an arena allocator with two stacks growing toward each other.
-//! All noun allocations are bump-allocated on the current frame.
-//! We allocate a single stack at the start and pass `&mut stack` through
-//! every builder function. No frame push/pop needed for simple noun
-//! construction — build the entire noun tree in a single pass.
+//! NockStack is an arena allocator with two stacks growing toward each
+//! other; noun allocations are bump-allocated on the current frame.
+//! Allocate one stack up front and pass `&mut stack` through every
+//! builder. Simple noun construction needs no frame push/pop — build
+//! the whole tree in a single pass.
 //!
 //! # Nock Encoding Conventions
 //!
@@ -45,6 +45,35 @@ pub use nockvm::serialization::{cue, jam};
 
 /// Default NockStack size: 8 MB (in 64-bit words).
 const STACK_SIZE: usize = 1 << 20;
+
+/// Safe wrapper around `NounSlab::root`.
+///
+/// AUDIT 2026-04-17 H-06: centralizes the `unsafe { *slab.root() }`
+/// pattern that was copy-pasted across eight sites. `root()` is
+/// `unsafe` because the returned `Noun` may contain raw pointers into
+/// the slab and must not outlive it. Copying the value out immediately
+/// is the established convention; this helper makes it the only
+/// supported entry point so nobody accidentally holds a `&Noun` past
+/// the slab drop.
+///
+/// ```ignore
+/// let slab = build_my_poke();          // must call set_root() internally
+/// let noun = slab_root(&slab);         // safe copy
+/// // use noun while slab is still alive
+/// ```
+///
+/// # Safety contract
+///
+/// The caller must ensure `slab.set_root(..)` was called first. A
+/// `NounSlab` with no root set has `root == D(0)` (the zero atom); the
+/// returned `Noun` is still memory-safe, but it's almost certainly a
+/// bug.
+pub fn slab_root<J>(slab: &NounSlab<J>) -> Noun {
+    // SAFETY: copied out immediately, never stored as a reference that
+    // could outlive the slab. The Noun may contain raw pointers into
+    // the slab's arena; use it before the slab is dropped.
+    unsafe { *slab.root() }
+}
 
 /// Create a NockStack for noun construction and jamming.
 ///
@@ -69,11 +98,12 @@ pub fn make_atom(stack: &mut NockStack, bytes: &[u8]) -> Noun {
     if bytes.is_empty() {
         return D(0);
     }
-    // SAFETY: bytes is a valid slice. new_raw_bytes_ref copies data into the
-    // NockStack allocator. normalize_as_atom produces a canonical atom representation.
+    // SAFETY: new_raw_bytes_ref copies the slice into the NockStack
+    // allocator; normalize_as_atom yields a canonical atom.
     unsafe {
         let mut indirect = IndirectAtom::new_raw_bytes_ref(stack, bytes);
-        indirect.normalize_as_atom().as_noun()
+        let space = stack.noun_space();
+        indirect.normalize_as_atom(&space).as_noun()
     }
 }
 
@@ -97,8 +127,8 @@ pub fn make_tag(stack: &mut NockStack, s: &str) -> Noun {
 ///
 /// `true` (`%.y`) -> `D(0)`, `false` (`%.n`) -> `D(1)`.
 ///
-/// This is the opposite of C/Rust convention. Hoon uses `0` for
-/// true because it's "yes" / `%.y` — the first in the union.
+/// Inverted versus C/Rust: Hoon uses `0` for true because `%.y` is
+/// first in the union.
 pub fn make_loobean(b: bool) -> Noun {
     if b { D(0) } else { D(1) }
 }
@@ -121,9 +151,22 @@ pub fn make_list(stack: &mut NockStack, items: &[Noun]) -> Noun {
 /// This is the format Hoon's `cue` expects.
 pub fn jam_to_bytes(stack: &mut NockStack, noun: Noun) -> Vec<u8> {
     let atom = jam(stack, noun);
-    let bytes = atom.as_ne_bytes();
+    let space = stack.noun_space();
+    let handle = atom.in_space(&space);
+    let bytes = handle.as_ne_bytes();
     let len = bytes.iter().rposition(|&b| b != 0).map_or(0, |pos| pos + 1);
     bytes[..len].to_vec()
+}
+
+/// Jam a `NounSlab`'s root noun to wire bytes.
+///
+/// Post-PMA the noun-allocator's arena identity is checked at jam time, so a
+/// slab-allocated noun cannot be jammed through a foreign `NockStack`. This
+/// helper uses the slab's own `NounSpace` for the jam — the same path
+/// `NounSlab::jam` follows internally — and returns a `Vec<u8>` for callers
+/// that previously consumed `jam_to_bytes(&mut new_stack(), slab_root(&slab))`.
+pub fn slab_jam_to_bytes<J: nockapp::noun::slab::Jammer>(slab: &NounSlab<J>) -> Vec<u8> {
+    slab.jam().to_vec()
 }
 
 /// Cue bytes back into a noun.
@@ -134,6 +177,32 @@ pub fn cue_from_bytes(stack: &mut NockStack, bytes: &[u8]) -> Option<Noun> {
     let atom = make_atom(stack, bytes);
     let a = atom.as_atom().ok()?;
     cue(stack, a).ok()
+}
+
+/// Re-jam an atom whose bytes came from a cue-emitting graft (e.g.
+/// `%queue-popped` body) so they can be fed to a cue-consuming graft
+/// (e.g. `%batch-add`) without double-cue corruption.
+///
+/// Cross-graft seam helper. State-grafts that store opaque payloads
+/// (queue, log, batch, registry) cue their input on entry and emit
+/// the resulting noun back unchanged. Walking that noun's bytes via
+/// `as_ne_bytes()` returns the *atom* representation, not a fresh jam
+/// encoding — feeding those bytes verbatim into another cue-consuming
+/// graft fails (or, on pathological back-refs, hangs the kernel inside
+/// `cue`). `rejam_atom` cues the bytes and re-jams the result so the
+/// next graft's `cue` succeeds.
+///
+/// Canonicalizing: input and output bytes encode the same noun but may
+/// not be byte-identical — jam isn't canonical, different jammers pick
+/// different back-ref schedules. The output is canonical under
+/// nockvm's jammer.
+///
+/// Panics if `bytes` is not valid jam.
+pub fn rejam_atom(bytes: &[u8]) -> Vec<u8> {
+    let mut stack = new_stack();
+    let noun = cue_from_bytes(&mut stack, bytes)
+        .expect("rejam_atom: input is not valid jam");
+    jam_to_bytes(&mut stack, noun)
 }
 
 // ---------------------------------------------------------------------------
@@ -151,11 +220,12 @@ pub fn make_atom_in(alloc: &mut impl NounAllocator, bytes: &[u8]) -> Noun {
     if bytes.is_empty() {
         return D(0);
     }
-    // SAFETY: bytes is a valid slice. new_raw_bytes_ref copies data into
-    // the allocator. normalize_as_atom produces a canonical atom representation.
+    // SAFETY: new_raw_bytes_ref copies the slice into the allocator;
+    // normalize_as_atom yields a canonical atom.
     unsafe {
         let mut indirect = IndirectAtom::new_raw_bytes_ref(alloc, bytes);
-        indirect.normalize_as_atom().as_noun()
+        let space = alloc.noun_space();
+        indirect.normalize_as_atom(&space).as_noun()
     }
 }
 
@@ -195,8 +265,16 @@ mod tests {
     #[test]
     fn loobean_encoding() {
         // %.y (true) = 0, %.n (false) = 1
-        assert_eq!(make_loobean(true).as_atom().unwrap().as_u64().unwrap(), 0);
-        assert_eq!(make_loobean(false).as_atom().unwrap().as_u64().unwrap(), 1);
+        let stack = new_stack();
+        let space = stack.noun_space();
+        assert_eq!(
+            make_loobean(true).in_space(&space).as_atom().unwrap().as_u64().unwrap(),
+            0,
+        );
+        assert_eq!(
+            make_loobean(false).in_space(&space).as_atom().unwrap().as_u64().unwrap(),
+            1,
+        );
     }
 
     #[test]
@@ -204,7 +282,8 @@ mod tests {
         let mut stack = new_stack();
         // 'abc' in Hoon = 97 + 98*256 + 99*65536 = 6513249
         let abc = make_cord(&mut stack, "abc");
-        let val = abc.as_atom().unwrap().as_u64().unwrap();
+        let space = stack.noun_space();
+        let val = abc.in_space(&space).as_atom().unwrap().as_u64().unwrap();
         assert_eq!(val, 97 + 98 * 256 + 99 * 65536);
     }
 
@@ -218,7 +297,8 @@ mod tests {
             .enumerate()
             .map(|(i, &b)| (b as u64) << (i * 8))
             .sum();
-        let val = tag.as_atom().unwrap().as_u64().unwrap();
+        let space = stack.noun_space();
+        let val = tag.in_space(&space).as_atom().unwrap().as_u64().unwrap();
         assert_eq!(val, expected);
     }
 
@@ -226,7 +306,8 @@ mod tests {
     fn empty_atom() {
         let mut stack = new_stack();
         let noun = make_atom(&mut stack, &[]);
-        assert_eq!(noun.as_atom().unwrap().as_u64().unwrap(), 0);
+        let space = stack.noun_space();
+        assert_eq!(noun.in_space(&space).as_atom().unwrap().as_u64().unwrap(), 0);
     }
 
     #[test]
@@ -235,8 +316,9 @@ mod tests {
         // [1 [2 [3 0]]]
         let items = [D(1), D(2), D(3)];
         let list = make_list(&mut stack, &items);
+        let space = stack.noun_space();
 
-        let c1 = list.as_cell().unwrap();
+        let c1 = list.in_space(&space).as_cell().unwrap();
         assert_eq!(c1.head().as_atom().unwrap().as_u64().unwrap(), 1);
 
         let c2 = c1.tail().as_cell().unwrap();
@@ -253,7 +335,8 @@ mod tests {
     fn empty_list() {
         let mut stack = new_stack();
         let list = make_list(&mut stack, &[]);
-        assert_eq!(list.as_atom().unwrap().as_u64().unwrap(), 0);
+        let space = stack.noun_space();
+        assert_eq!(list.in_space(&space).as_atom().unwrap().as_u64().unwrap(), 0);
     }
 
     #[test]
@@ -279,5 +362,62 @@ mod tests {
         slab.set_root(cause);
         // Just verify it doesn't panic — slab nouns can't be inspected
         // the same way as stack nouns without converting.
+    }
+
+    #[test]
+    fn rejam_atom_canonicalizes_atom() {
+        let mut stack = new_stack();
+        let bytes = jam_to_bytes(&mut stack, D(42));
+        let rejammed = rejam_atom(&bytes);
+        let mut s2 = new_stack();
+        let cued = cue_from_bytes(&mut s2, &rejammed).expect("rejam output cues");
+        let space = s2.noun_space();
+        assert_eq!(cued.in_space(&space).as_atom().unwrap().as_u64().unwrap(), 42);
+    }
+
+    #[test]
+    fn rejam_atom_canonicalizes_cell() {
+        let mut stack = new_stack();
+        let cell = T(&mut stack, &[D(1), D(2), D(3)]);
+        let bytes = jam_to_bytes(&mut stack, cell);
+        let rejammed = rejam_atom(&bytes);
+        let mut s2 = new_stack();
+        let cued = cue_from_bytes(&mut s2, &rejammed).expect("rejam output cues");
+        let space = s2.noun_space();
+        let c1 = cued.in_space(&space).as_cell().unwrap();
+        assert_eq!(c1.head().as_atom().unwrap().as_u64().unwrap(), 1);
+        let c2 = c1.tail().as_cell().unwrap();
+        assert_eq!(c2.head().as_atom().unwrap().as_u64().unwrap(), 2);
+        assert_eq!(c2.tail().as_atom().unwrap().as_u64().unwrap(), 3);
+    }
+
+    #[test]
+    fn rejam_atom_canonicalizes_indirect() {
+        // Large indirect atom — jam encoding spans multiple bytes;
+        // round-trip through cue+jam must preserve the value.
+        let payload: Vec<u8> = (0..1024).map(|i| (i & 0xff) as u8).collect();
+        let mut stack = new_stack();
+        let big = make_atom(&mut stack, &payload);
+        let bytes = jam_to_bytes(&mut stack, big);
+        let rejammed = rejam_atom(&bytes);
+        // Both jams cue back to the same atom value.
+        let mut s2 = new_stack();
+        let original = cue_from_bytes(&mut s2, &bytes).expect("original cues");
+        let space2 = s2.noun_space();
+        let mut s3 = new_stack();
+        let canonical = cue_from_bytes(&mut s3, &rejammed).expect("rejam cues");
+        let space3 = s3.noun_space();
+        assert_eq!(
+            original.in_space(&space2).as_atom().unwrap().as_ne_bytes(),
+            canonical.in_space(&space3).as_atom().unwrap().as_ne_bytes(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "rejam_atom: input is not valid jam")]
+    fn rejam_atom_panics_on_malformed() {
+        // 0xff has the high bit pattern of a valid jam prefix but no
+        // backing data — cue rejects.
+        let _ = rejam_atom(&[0xff, 0xff]);
     }
 }

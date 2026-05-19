@@ -5,7 +5,7 @@ use nockapp::kernel::boot;
 use nockapp::noun::slab::NounSlab;
 use nockapp::wire::{SystemWire, Wire};
 use nockapp::NockApp;
-use nockvm::noun::{D, T};
+use nockvm::noun::{D, T, NounAllocator};
 use nockvm_macros::tas;
 
 #[tokio::main]
@@ -17,10 +17,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|e| format!("Failed to read out.jam: {}", e))?;
 
     let mut app: NockApp =
-        boot::setup(&kernel, cli, &[], "{{project_name}}", None).await?;
+        boot::setup(&kernel, cli, &[], "settle-report", None).await?;
 
-    // Step 1: Commit data for ID 1
-    // The kernel stores shax(data) as the commitment hash
+    // Step 1: Commit data for ID 1; the kernel stores shax(data) as the commitment.
     let mut slab = NounSlab::new();
     let poke = T(&mut slab, &[
         D(tas!(b"commit")),
@@ -33,8 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let effects = app.poke(SystemWire.to_wire(), slab).await?;
     print_effects(&effects);
 
-    // Step 2: Settle with the same data (should succeed)
-    // shax(42) matches the commitment
+    // Step 2: Settle with the same data — shax(42) matches the commitment (should succeed)
     let mut slab = NounSlab::new();
     let poke = T(&mut slab, &[
         D(tas!(b"settle")),
@@ -108,7 +106,8 @@ fn print_effects(effects: &[NounSlab]) {
     }
     for effect in effects.iter() {
         let noun = unsafe { effect.root() };
-        if let Ok(cell) = noun.as_cell() {
+        let space = effect.noun_space();
+        if let Ok(cell) = noun.in_space(&space).as_cell() {
             if let Ok(tag) = cell.head().as_atom() {
                 let tag_bytes = tag.as_ne_bytes();
                 let tag_str = std::str::from_utf8(tag_bytes)

@@ -1,18 +1,21 @@
 [package]
-name = "{{project_name}}"
+name = "settle-report"
 version = "0.1.0"
 edition = "2021"
-authors = ["{{author_name}} <{{author_email}}>"]
+authors = ["Vesl Examples <examples@vesl.local>"]
 description = "Settlement NockApp — commit, verify, settle with replay protection"
 
 [[bin]]
-name = "{{project_name}}"
+name = "settle-report"
 path = "src/main.rs"
 
 [dependencies]
-nockapp = { git = "https://github.com/nockchain/nockchain.git", rev = "{{nockapp_commit_hash}}" }
-nockvm = { git = "https://github.com/nockchain/nockchain.git", rev = "{{nockapp_commit_hash}}" }
-nockvm_macros = { git = "https://github.com/nockchain/nockchain.git", rev = "{{nockapp_commit_hash}}" }
+nockapp = { path = "../../../nockchain/crates/nockapp" }
+nockvm = { path = "../../../nockchain/crates/nockvm/rust/nockvm" }
+nockvm_macros = { path = "../../../nockchain/crates/nockvm/rust/nockvm_macros" }
 
 tokio = { version = "1.32", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0"
+
+[patch.crates-io]
+ibig = { path = "../../../nockchain/crates/nockvm/rust/ibig" }

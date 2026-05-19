@@ -18,6 +18,7 @@
 ::
 /-  *vesl
 /+  *rag-logic
+/+  *kernel-arms
 /=  *  /common/wrapper
 ::
 =>
@@ -68,13 +69,9 @@
       ::  %register — store hull root
       ::
         %register
-      ::  Guard: reject re-registration (hull already has a root)
-      ::
-      ?:  (~(has by registered.state) hull.u.act)
-        ~>  %slog.[3 'guard: hull already registered']
-        [~ state]
-      =/  new-reg  (~(put by registered.state) hull.u.act root.u.act)
-      :_  state(registered new-reg)
+      =/  res  (handle-register registered.state hull.u.act root.u.act 'guard:')
+      ?~  res  [~ state]
+      :_  state(registered u.res)
       ^-  (list effect)
       ~[[%registered hull.u.act root.u.act]]
       ::
@@ -83,21 +80,17 @@
       ::    Returns [%verified ok=?] — no state change
       ::
         %verify
-      =/  raw=*  (cue payload.u.act)
-      =/  args=settlement-payload  ;;(settlement-payload raw)
-      ::  Guard: reject unregistered roots
-      ::
-      ?.  (~(has by registered.state) hull.note.args)
+      =/  parsed  (parse-payload payload.u.act)
+      ?~  parsed
         :_  state
         ^-  (list effect)
         ~[[%verified %.n]]
-      ::  Guard: expected root must match registered root
-      ::
-      ?.  =(expected-root.args (~(got by registered.state) hull.note.args))
+      =/  res  (validate-settlement-args u.parsed registered.state ~ %verify 'guard:')
+      ?:  ?=(%.n -.res)
         :_  state
         ^-  (list effect)
         ~[[%verified %.n]]
-      ::
+      =/  args=settlement-payload  args.res
       =/  ok=?  (verify-manifest mani.args expected-root.args)
       :_  state
       ^-  (list effect)

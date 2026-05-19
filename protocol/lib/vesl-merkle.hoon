@@ -5,6 +5,33 @@
 ::  Import this for Merkle commitment, leaf hashing, and proof
 ::  verification in any verification gate.
 ::
+::  Shared-merkle surface — the following arms are the stable
+::  primitives every graft (mint, guard, settle, forge) reuses.
+::  Do not rename or reshape without coordinating across all
+::  four primitives; the graft-inject manifest imports block
+::  pastes `/+  *vesl-merkle` into composed kernels under the
+::  assumption that these arms exist by these names.
+::
+::    hash-leaf       tip5 hash of raw atom data.  Used by mint
+::                    for commitment, by guard for leaf check,
+::                    by settle's default verify-gate, by forge
+::                    for Fiat-Shamir leaf binding.
+::    hash-leaf-digest  same hash as hash-leaf, but returned as a
+::                    noun-digest:tip5 instead of a flat atom.  Used
+::                    where a downstream sponge consumer wants the
+::                    5-belt shape directly (e.g. schnorr verify's
+::                    message digest).
+::    hash-pair       tip5 pair hash of two digest atoms.  Used
+::                    inside verify-chunk and by any graft that
+::                    folds up an internal Merkle node.
+::    verify-chunk    prove a chunk is bound to a Merkle root via
+::                    a sibling-hash proof.  Depth-capped at 64.
+::    split-to-belts  atom -> 7-byte field-element list.  Used by
+::                    forge's belt-digest fold and by any gate that
+::                    wants to hash cell-shaped data as a flat atom.
+::    belts-to-atom   inverse of split-to-belts.  Used by Rust-side
+::                    reconstruction paths that consume belt lists.
+::
 /=  *  /common/zeke
 ::
 |%
@@ -47,6 +74,20 @@
   =/  n=@  (lent belts)
   (digest-to-atom:tip5 (hash-belts-list:tip5 [n belts]))
 ::
+::  +hash-leaf-digest: tip5 hash of raw leaf data, as a digest
+::
+::  Same chunking + sponge as hash-leaf, returned as the 5-belt
+::  noun-digest:tip5 without the digest-to-atom step.  Use when the
+::  consumer is itself a sponge (schnorr verify's message digest,
+::  for instance) instead of a flat-atom commitment.
+::
+++  hash-leaf-digest
+  |=  dat=@
+  ^-  noun-digest:tip5
+  =/  belts=(list @)  (split-to-belts dat)
+  =/  n=@  (lent belts)
+  (hash-belts-list:tip5 [n belts])
+::
 ::  +hash-pair: tip5 pair hash of two digest atoms
 ::
 ::  Converts each flat atom back to a 5-limb noun-digest,
@@ -69,7 +110,15 @@
 ++  verify-chunk
   |=  [chunk=@ proof=(list [hash=@ side=?]) expected-root=@]
   ^-  ?
-  ?:  (gth (lent proof) 64)  %.n
+  ::  AUDIT 2026-04-19 M-13: slog on depth-cap overflow so operators
+  ::  can distinguish "proof too deep" from "proof hashes mismatch."
+  ::  Kept as soft %.n (not a crash) to preserve the loobean contract
+  ::  callers depend on in %verify arms. 64 supports 2^64 leaves, so
+  ::  a legitimate caller will never trip this.
+  ::
+  ?:  (gth (lent proof) 64)
+    ~>  %slog.[3 'vesl-merkle: proof exceeds 64-node cap']
+    %.n
   =/  cur=@  (hash-leaf chunk)
   |-
   ?~  proof

@@ -2,7 +2,7 @@
 
 > You shouldn't need to read 57,000 lines of wallet code to build a cell.
 
-Ergonomic Nock noun construction from Rust. The missing manual for
+High-level Nock noun construction from Rust. The missing manual for
 `NockStack`, `NounSlab`, and the sharp edges between them.
 
 ## Why this exists
@@ -86,7 +86,7 @@ pub use nockapp::noun::slab::NounSlab;
 
 ## Who made this
 
-Extracted from [Vesl](https://github.com/zkVesl/vesl) — verifiable RAG
+Extracted from [Vesl](https://github.com/zkvesl/vesl-core) — verifiable RAG
 on Nockchain. Built by people who misuse `NounSlab` in production and
 have the scars to prove it.
 
