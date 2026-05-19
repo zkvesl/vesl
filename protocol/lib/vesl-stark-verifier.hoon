@@ -16,6 +16,11 @@
   =|  test-mode=_|
   |=  [=proof override=(unit (list term)) verifier-eny=@ s=* f=*]
   ^-  ?
+  ::  AUDIT 2026-05-19 C-02: hard-assert test-mode=%.n at the outer gate;
+  ::  a caller passing %.y would silently skip verify-merk-proofs inside
+  ::  +verify-inner. The line-510 conditional stays as defense-in-depth.
+  ::
+  ?>  =(test-mode %.n)
   ::  AUDIT 2026-04-19 C-lead-4: pin version.proof = %2. vesl-prover only
   ::  emits %2; accepting %0 / %1 here would let an attacker re-tag a v2
   ::  proof and replay it against v0/v1 preprocessing data. version.proof
@@ -46,6 +51,10 @@
   =|  test-mode=_|
   |=  [=proof override=(unit (list term)) verifier-eny=@ s=* f=* expected-root=@ expected-hull=@]
   ^-  ?
+  ::  AUDIT 2026-05-19 C-02: hard-assert test-mode=%.n at the outer gate
+  ::  (see +verify above for rationale).
+  ::
+  ?>  =(test-mode %.n)
   ::  AUDIT 2026-04-19 C-lead-4: pin version.proof = %2 (see +verify).
   ::
   ?>  ?=(%2 version.proof)
