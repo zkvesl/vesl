@@ -13,6 +13,13 @@ on:
 # Until then, this workflow is useful for local `act` runs and as a template.
 
 jobs:
+  check-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scripts/check-pins.sh
+        run: ./scripts/check-pins.sh
+
   test:
     runs-on: ubuntu-latest
     steps:
