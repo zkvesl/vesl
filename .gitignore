@@ -48,3 +48,7 @@ protocol/lib/vesl-debug.hoon
 protocol/lib/vesl-identity.hoon
 protocol/tests/sanity.hoon
 chunk_store.json
+
+# Release tooling (maintainer-local; release.yml workflow stays tracked)
+/scripts/release.sh
+/scripts/release-notes.template.md
