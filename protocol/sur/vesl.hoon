@@ -1,6 +1,8 @@
-::  sur/vesl.hoon: Verified-RAG core data structures
+::  sur/vesl.hoon: Vesl core data structures
 ::
-::  Tier 1-4 types for the Hull architecture.
+::  Generic types shared across all hulls.  Domain-specific extensions
+::  (RAG manifests, KV envelopes, log entries, etc.) live in downstream
+::  hulls — see e.g. hull-llm/protocol/sur/rag.hoon for the RAG types.
 ::  Designed for ZK-circuit translation via Zorp ZKVM.
 ::  All hash fields are bare @ for minimal prover overhead.
 ::
@@ -13,22 +15,7 @@
 +$  proof-node  [hash=@ side=?]
 +$  merkle-proof  (list proof-node)
 ::
-::  Tier 2: Local Inference
-::
-+$  retrieval
-  $:  =chunk
-      proof=merkle-proof
-      score=@ud
-  ==
-+$  manifest
-  $:  query=@t
-      results=(list retrieval)
-      prompt=@t
-      output=@t
-      page=@ud
-  ==
-::
-::  Tier 3: Nock-Prover
+::  Tier 2: Nock-Prover
 ::
 +$  nock-zkp
   $:  root=merkle-root
@@ -36,7 +23,7 @@
       stamp=@da
   ==
 ::
-::  Tier 4: Settlement
+::  Tier 3: Settlement
 ::
 +$  hull-id  @
 +$  note-state
@@ -51,7 +38,7 @@
       state=note-state
   ==
 ::
-::  Tier 5: ABI Boundary
+::  Tier 4: ABI Boundary
 ::
 ::  The strict type for cross-runtime settlement payloads.
 ::  Defines the exact noun structure the Rust Hull must produce.

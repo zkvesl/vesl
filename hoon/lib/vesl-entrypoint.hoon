@@ -1,1 +1,0 @@
-../../protocol/lib/vesl-entrypoint.hoon
