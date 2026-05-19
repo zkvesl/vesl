@@ -1,0 +1,55 @@
+name: release
+
+# Fires when a `v*` tag is pushed (typically to origin/main on release day).
+# Reads release notes from the tag's annotation body — git-native, no
+# committed RELEASE_NOTES.md file. The release.sh script writes a notes
+# draft to /tmp; the operator passes it to `git tag -a -F <notes>` when
+# tagging origin/main, and this workflow surfaces it as the GitHub Release
+# body.
+#
+# Prerelease detection: tags matching -alpha./-beta./-rc. flip the
+# --prerelease flag automatically.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+
+          # Extract annotation body. Lightweight tags return empty.
+          git tag -l --format='%(contents)' "$tag" > /tmp/release-body.md
+
+          prerelease_flag=""
+          if [[ "$tag" == *"-alpha."* || "$tag" == *"-beta."* || "$tag" == *"-rc."* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
+          if [[ -s /tmp/release-body.md ]]; then
+            gh release create "$tag" \
+              --title "$tag" \
+              --notes-file /tmp/release-body.md \
+              $prerelease_flag
+          else
+            echo "tag $tag has no annotation body; falling back to auto-generated notes"
+            gh release create "$tag" \
+              --title "$tag" \
+              --generate-notes \
+              $prerelease_flag
+          fi
