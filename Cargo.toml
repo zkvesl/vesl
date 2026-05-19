@@ -9,6 +9,7 @@ members = [
     "kernels/guard",
     "kernels/mint",
     "kernels/settle",
+    "kernels/forge",
 ]
 # Templates are independent Cargo packages — end-users copy one out and
 # build it standalone (see templates/<name>/README.md). They keep their

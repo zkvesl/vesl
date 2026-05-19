@@ -7,12 +7,13 @@
 # notices the STARK subject shifted.
 #
 # Covers the kernels whose JAM assets live in vesl-core:
-#   guard-kernel.hoon → assets/guard.jam
-#   mint-kernel.hoon  → assets/mint.jam
+#   guard-kernel.hoon  → assets/guard.jam
+#   mint-kernel.hoon   → assets/mint.jam
 #   settle-kernel.hoon → assets/settle.jam
+#   forge-kernel.hoon  → assets/forge.jam
 #
-# forge-kernel.hoon and vesl-kernel.hoon compile here too but their JAM lives
-# in hull-llm/assets/ — that repo owns its own check.
+# vesl-kernel.hoon and its JAM (vesl.jam) live in hull-llm, since
+# vesl-kernel composes RAG-specific logic; that repo owns its own check.
 #
 # Usage:
 #   ./scripts/check-jam.sh
@@ -63,7 +64,7 @@ fi
 
 # -- Verify each kernel -------------------------------------------------------
 status=0
-for kernel in guard mint settle; do
+for kernel in guard mint settle forge; do
     src="protocol/lib/${kernel}-kernel.hoon"
     if [[ ! -f "$src" ]]; then
         echo "error: $src missing." >&2
