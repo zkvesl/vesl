@@ -23,31 +23,6 @@ pub type NounSlab = nockapp::noun::slab::NounSlab<nockapp::noun::slab::NockJamme
 // Vesl domain types — mirrors of sur/vesl.hoon
 use serde::{Deserialize, Serialize};
 
-/// Mirror of `+$chunk  [id=chunk-id dat=@t]`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Chunk {
-    pub id: u64,
-    pub dat: String,
-}
-
-/// Mirror of `+$retrieval  [=chunk proof=merkle-proof score=@ud]`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Retrieval {
-    pub chunk: Chunk,
-    pub proof: Vec<ProofNode>,
-    pub score: u64,
-}
-
-/// Mirror of `+$manifest  [query=@t results=(list retrieval) prompt=@t output=@t page=@ud]`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Manifest {
-    pub query: String,
-    pub results: Vec<Retrieval>,
-    pub prompt: String,
-    pub output: String,
-    pub page: u64,
-}
-
 /// Mirror of `+$nock-zkp  [root=merkle-root prf=@ stamp=@da]`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NockZkp {
@@ -84,13 +59,15 @@ pub struct GraftPayload {
 }
 
 /// Commitment verification trait. Implement for your computation type.
-/// `RagVerifier` is the built-in implementation for RAG manifests.
 ///
 /// Decides whether `data` binds to `expected_root` under a domain-specific
-/// rule (for RAG: manifest chunks prove into the merkle root; for other
-/// domains: whatever the commitment gate demands). This is commitment-layer
-/// plumbing — it has nothing to do with intent coordination despite the
-/// legacy `IntentVerifier` name retained as a deprecated alias below.
+/// rule. Implementations live in downstream hulls (e.g. hull-llm provides
+/// the RAG-manifest verifier). vesl-core ships only the trait + a test
+/// MockVerifier; no built-in production implementation.
+///
+/// This is commitment-layer plumbing — it has nothing to do with intent
+/// coordination despite the legacy `IntentVerifier` name retained as a
+/// deprecated alias below.
 ///
 /// AUDIT 2026-04-17 H-03: `verify` takes `note_id` so domain verifiers
 /// can enforce `note_id == deterministic_fn(data)`, closing the

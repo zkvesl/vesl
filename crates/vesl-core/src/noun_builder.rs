@@ -1,11 +1,11 @@
 //! Generic Nock noun construction helpers for settlement payloads.
 //!
 //! These helpers build domain-agnostic noun structures (hashes, proof nodes,
-//! chunks, notes, register pokes) used by any hull. Domain-specific builders
+//! notes, register pokes) used by any hull. Domain-specific builders
 //! (manifest, settlement payload, settle/prove pokes) stay in the domain hull.
 
 use nock_noun_rs::{
-    atom_from_u64, make_atom, make_atom_in, make_cord, make_loobean,
+    atom_from_u64, make_atom, make_atom_in, make_loobean,
     Cell, D, NounSlab, NockStack, Noun, NounAllocator, T,
 };
 use nockchain_tip5_rs::tip5_to_atom_le_bytes;
@@ -47,31 +47,6 @@ pub fn proof_list_to_noun(stack: &mut NockStack, proof: &[ProofNode]) -> Noun {
     let mut list = D(0); // null terminator
     for node in proof.iter().rev() {
         let item = proof_node_to_noun(stack, node);
-        list = Cell::new(stack, item, list).as_noun();
-    }
-    list
-}
-
-/// `+$chunk  [id=chunk-id dat=@t]`
-pub fn chunk_to_noun(stack: &mut NockStack, chunk: &Chunk) -> Noun {
-    let id = atom_from_u64(stack, chunk.id);
-    let dat = make_cord(stack, &chunk.dat);
-    T(stack, &[id, dat])
-}
-
-/// `+$retrieval  [=chunk proof=merkle-proof score=@ud]`
-pub fn retrieval_to_noun(stack: &mut NockStack, r: &Retrieval) -> Noun {
-    let c = chunk_to_noun(stack, &r.chunk);
-    let p = proof_list_to_noun(stack, &r.proof);
-    let s = D(r.score);
-    T(stack, &[c, p, s])
-}
-
-/// `(list retrieval)` -> null-terminated right-leaning.
-pub fn retrieval_list_to_noun(stack: &mut NockStack, results: &[Retrieval]) -> Noun {
-    let mut list = D(0);
-    for r in results.iter().rev() {
-        let item = retrieval_to_noun(stack, r);
         list = Cell::new(stack, item, list).as_noun();
     }
     list
@@ -119,7 +94,7 @@ pub fn build_register_poke(hull_id: u64, root: &Tip5Hash) -> NounSlab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nock_noun_rs::new_stack;
+    use nock_noun_rs::{make_cord, new_stack};
 
     #[test]
     fn loobean_encoding() {

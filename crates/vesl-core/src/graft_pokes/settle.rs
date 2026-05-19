@@ -22,7 +22,7 @@
 //! `%settle-settle` and avoids collision with `%mint-commit`.
 
 use nock_noun_rs::{
-    atom_from_u64, make_atom_in, make_cord_in, make_list_in, make_loobean,
+    atom_from_u64, make_atom_in, make_list_in, make_loobean,
     make_tag_in, slab_jam_to_bytes, NounSlab,
 };
 use nockchain_tip5_rs::{tip5_to_atom_le_bytes, ProofNode, Tip5Hash};
@@ -220,46 +220,10 @@ pub fn build_settle_note_bounded_poke(
     })
 }
 
-/// Build a `%settle-note` poke whose `data` cell matches the
-/// `manifest-verify` gate's expected payload:
-/// `[fields=(list [name=@t value=@]) proofs=(list (list [hash=@ side=?]))]`.
-///
-/// `fields` are `(cord, value)` pairs; the gate iterates pairs of
-/// `fields` and `proofs` and AND-folds `verify-chunk(value, proof, root)`
-/// over each. Length mismatch yields `%.n` (gate-side); `fields.len()
-/// != proofs.len()` here is the caller's responsibility.
-pub fn build_settle_note_manifest_poke(
-    note_id: u64,
-    hull: u64,
-    root: &Tip5Hash,
-    fields: &[(&[u8], &[u8])],
-    proofs: &[Vec<ProofNode>],
-) -> NounSlab {
-    build_settle_note_poke_with_data(note_id, hull, root, move |slab| {
-        let field_nouns: Vec<Noun> = fields
-            .iter()
-            .map(|(name, value)| {
-                let name_noun = make_cord_in(slab, std::str::from_utf8(name).unwrap_or(""));
-                let value_noun = make_atom_in(slab, value);
-                T(slab, &[name_noun, value_noun])
-            })
-            .collect();
-        let fields_list = make_list_in(slab, &field_nouns);
-
-        let proof_nouns: Vec<Noun> = proofs
-            .iter()
-            .map(|proof| build_proof_list(slab, proof))
-            .collect();
-        let proofs_list = make_list_in(slab, &proof_nouns);
-
-        T(slab, &[fields_list, proofs_list])
-    })
-}
-
 /// Build a `(list [hash=@ side=?])` from a slice of [`ProofNode`].
 ///
-/// Shared by `set-membership-verify`, `bounded-value-verify`, and
-/// `manifest-verify`'s inner-proof shape.
+/// Shared by `set-membership-verify` and `bounded-value-verify`'s
+/// inner-proof shape.
 fn build_proof_list(slab: &mut NounSlab, proof: &[ProofNode]) -> Noun {
     let nodes: Vec<Noun> = proof
         .iter()
@@ -603,19 +567,6 @@ mod tests {
         let root = fixture_root();
         let slab =
             build_settle_note_bounded_poke(9, 1, &root, 42, (10, 100), &fixture_proof());
-        let bytes = slab_jam_to_bytes(&slab);
-        assert!(!bytes.is_empty());
-    }
-
-    #[test]
-    fn build_settle_note_manifest_poke_emits_nonempty_jam() {
-        let root = fixture_root();
-        let fields: &[(&[u8], &[u8])] = &[
-            (b"name", b"alice"),
-            (b"age", b"\x2a"),
-        ];
-        let proofs = vec![fixture_proof(), fixture_proof()];
-        let slab = build_settle_note_manifest_poke(13, 1, &root, fields, &proofs);
         let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }
