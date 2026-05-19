@@ -1,9 +1,14 @@
 name: vesl-core ↔ vesl-nockup sync
 
-# Asserts that vesl-nockup/crates/* is a byte-mirror of vesl-core/crates/*.
-# vesl-nockup's sync.sh is the mechanism that maintains this invariant; this
-# workflow catches "fixed in vesl-core, forgot to run sync.sh" drift on PRs
-# that touch crates/.
+# Asserts that vesl-nockup's committed bundle is what `sync.sh` would
+# produce from this PR's vesl-core HEAD. Runs `vesl-nockup/sync.sh
+# --verify` with VESL_CORE_PIN overridden to the PR head SHA — so the
+# gate enforces "vesl-nockup is in sync with this PR's vesl-core," not
+# just with whatever pin sync.sh defaulted to last week.
+#
+# The vesl-wallet pin is tracked auto-magically by reading sync.sh's
+# canonical default — when vesl-nockup bumps it, this workflow follows
+# without needing a parallel edit here.
 #
 # Runs on PRs that modify crates/* and on pushes to main/dev.
 
@@ -18,31 +23,65 @@ on:
       - 'crates/**'
 
 jobs:
-  diff-crates:
+  sync-verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout vesl-core
+      - name: Checkout vesl-core (PR head)
         uses: actions/checkout@v4
         with:
           path: vesl-core
+          # PR events default to a merge commit; we want the actual PR
+          # head so sync.sh sees the same SHA we pin via VESL_CORE_PIN.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Checkout vesl-nockup
+      - name: Checkout vesl-nockup (main)
         uses: actions/checkout@v4
         with:
           repository: zkvesl/vesl-nockup
+          ref: main
           path: vesl-nockup
 
-      - name: Diff crates/ trees
+      - name: Extract vesl-wallet pin from vesl-nockup sync.sh
+        id: pins
         run: |
-          # Any source difference fails the job. target/ is excluded because
-          # it's cargo build output, not part of the mirror contract.
-          #
-          # The expected fix is: run sync.sh in vesl-nockup and push the mirror
-          # in the same PR (or a follow-up) that lands the vesl-core change.
-          if ! diff -rq --exclude=target vesl-core/crates vesl-nockup/crates; then
-            echo ""
-            echo "vesl-core/crates and vesl-nockup/crates have drifted."
-            echo "Fix: cd vesl-nockup && ./sync.sh && commit the result."
+          # vesl-nockup/sync.sh's canonical VESL_WALLET_PIN default is
+          # the source-of-truth for which vesl-wallet SHA the committed
+          # bundle was synced from. Read it so this workflow doesn't
+          # have its own copy to keep in lockstep.
+          wallet_pin=$(grep -oE 'VESL_WALLET_PIN="\$\{VESL_WALLET_PIN:-[a-f0-9]{40}' \
+            vesl-nockup/sync.sh | grep -oE '[a-f0-9]{40}$')
+          if [[ -z "$wallet_pin" ]]; then
+            echo "could not extract VESL_WALLET_PIN from vesl-nockup/sync.sh" >&2
             exit 1
           fi
-          echo "crates/ trees match."
+          echo "wallet_pin=$wallet_pin" >> "$GITHUB_OUTPUT"
+          echo "resolved VESL_WALLET_PIN=$wallet_pin from vesl-nockup/sync.sh"
+
+      - name: Checkout vesl-wallet at sync.sh's canonical pin
+        uses: actions/checkout@v4
+        with:
+          repository: zkvesl/vesl-wallet
+          ref: ${{ steps.pins.outputs.wallet_pin }}
+          path: vesl-wallet
+
+      - name: Run sync.sh --verify against PR head
+        run: |
+          # Override VESL_CORE_PIN to the PR head SHA so check_sibling_pin
+          # in sync.sh accepts our vesl-core checkout. VESL_WALLET_PIN is
+          # the canonical default; we already checked out vesl-wallet at
+          # exactly that SHA so no override needed there.
+          cd vesl-nockup
+          VESL_CORE_PIN="${{ github.event.pull_request.head.sha || github.sha }}" \
+            ./sync.sh --verify \
+              "$GITHUB_WORKSPACE/vesl-core" \
+              "$GITHUB_WORKSPACE/vesl-wallet"
+
+      - name: Drift hint
+        if: failure()
+        run: |
+          echo ""
+          echo "vesl-nockup's committed bundle is out of sync with this PR's vesl-core."
+          echo ""
+          echo "Fix: clone vesl-nockup, run ./sync.sh from its root, commit the result,"
+          echo "and push to vesl-nockup. The gate will pass once vesl-nockup's main has"
+          echo "the matching mirror commit."
