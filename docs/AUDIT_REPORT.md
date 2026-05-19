@@ -1,433 +1,1146 @@
-# Vesl Security Audit Report
+# Vesl Security Audit Report — 2026-05-19 Beta Review
 
-**Scope:** `vesl-core` @ `d613b05` (branch `parametize-3`) and `vesl-nockup` @ working tree.
-**Methodology:** adversarial whitebox review of the Rust↔Hoon trust boundary, kernel JAM integrity, STARK verifier, Merkle commitment math, settlement state-machine, HTTP API, signing primitives (Schnorr-over-Cheetah + BIP-39/44), SIWN, replay caches, and the sync.sh supply chain.
-**Auditor framing:** treat every kernel poke, every effect-list return, every byte that crosses the noun boundary as attacker-influenced unless an explicit gate proves otherwise.
+**Scope.** Adversarial whitebox audit of the three repositories that ship together for the Vesl beta release:
+
+- `vesl-core` @ `e509c86` (branch `dev`) — Hoon protocol, Rust Vessel, kernel JAMs.
+- `vesl-nockup` @ `3d25925` (branch `dev`) — CLI, sync.sh supply chain, templates, mirrored crates, vesl-hull.
+- `vesl-wallet` @ `e270b00` (branch `dev`) — vesl-signing, vesl-wallet, vesl-wallet-spec.
+
+**Methodology.** Six parallel adversarial agents probed: (1) Hoon kernels + grafts, (2) STARK prover/verifier soundness, (3) Rust Vessel panic/async surface, (4) Rust↔Hoon boundary crates (nock-noun-rs, nockchain-tip5-rs, nockchain-client-rs, vesl-checkpoint), (5) vesl-wallet HD/Schnorr/CAIP-122, (6) vesl-nockup supply chain. Cross-checked against `stark-proof-stash` (additive-only WIP, currently behind tree on security fixes). Verified key claims via independent grep / file inspection.
+
+**Threat model.** Every kernel poke, every effect, every byte that crosses the Rust↔Hoon boundary is attacker-influenced unless an explicit gate proves otherwise. Where the previous audit (`AUDIT_REPORT.md` pre-2026-05-19) treated a finding as deferred, this report verifies the current code state — multiple "DEFERRED" items from the prior audit remain unfixed in `dev` and are restated below at higher severity for beta-readiness purposes.
 
 ---
 
 ## 1. Executive Summary
 
-Vesl's security posture is **structurally sound but operationally brittle**. The protocol invariants (JAM integrity gates, version-pinned STARK verifier, deterministic Schnorr, domain-separated Tip5 hashing, replay-protected settle kernel, depth-capped Merkle proofs) are correctly designed and well-tested. The Hoon kernels are conservative, the kernel-arms chain validates registration / expected-root / note-root / replay in the right order, and the Rust SDK layers (`Mint`, `Guard`, `Settle`) bound input sizes, reject duplicate chunk IDs, and constant-time-compare roots.
+**Verdict: NOT READY FOR BETA.** Three independent classes of critical findings would each, on their own, justify holding the release.
 
-What it doesn't do reliably is **propagate kernel state divergence back to its API callers**. The generic hull's `/commit` and `/settle` endpoints silently desynchronize from the on-chain kernel after the first commit per `hull_id`, because the kernel rejects re-registration but the Rust handler discards the empty-effects signal. Anyone trusting the hull's response field on a subsequent commit is accepting a claim the kernel never attested. This is the single most consequential finding in the audit.
+1. **Kernel-integrity gate is disconnected from the production code path.** `kernels-{guard,mint,settle}::verify_kernel()` exists, sha256-hashes the embedded JAM, panics on mismatch — and is **never called by any caller in vesl-core, vesl-nockup, or any of the nine templates**. The actual production path is `let kernel = fs::read("out.jam")?` across every shipped template. An attacker who can replace `out.jam` at deploy time (directory write, supply-chain compromise, careless overwrite) boots a swapped kernel with no integrity check. C-01 (Rust Vessel).
 
-Beyond that one, the more interesting risks are concentrated in three places:
+2. **The STARK soundness boundary is currently bypassed in two independent ways.** First, the `test-mode` parameter on `+verify` and `+verify-settlement` (`AUDIT_H01_TEST_MODE.md` Option B; tracked since 2026-04-19) **is still not asserted closed** — any caller that passes `%.y` silently disables Merkle-opening verification. Second, the `forge-kernel.hoon` and `vesl-kernel.hoon` `%prove` arms check only the *outer mule head* of `prove-computation`, not the inner `each %& %|` discriminator — a prover error noun (`[%| %too-big ...]`) is treated as a valid proof, the note is permanently settled, and a structurally-shaped "proof" is emitted. C-02, C-03 (Hoon protocol).
 
-1. **STARK verifier knobs** — `test-mode` is a runtime parameter not bound into the proof, and a self-documented constraint-completeness TODO sits next to soundness-critical challenge derivation.
-2. **Length-collision on tip5 hash-leaf** — `hash_leaf("x")` == `hash_leaf("x\0")`, an intentional cross-VM alignment property with documented but easy-to-trip security implications for any caller treating byte-length as semantic.
-3. **Operational surfaces** — in-memory replay caches, global rate limits, demo signing keys, and a sync.sh supply chain that copies symlinks with `cp -rL`. These are not bugs; they are choices that need operator awareness to ship safely.
+3. **The cross-VM Tip5 boundary admits chainsplit-class divergence in release builds.** `nockchain-math`'s `based!` macro is `debug_assert!` (release-mode no-op). `nockchain-tip5-rs` constructs `Tip5Hash` limbs (`[u64; 5]`) at the Rust API surface without validating that each limb is below the Goldilocks prime. The Hoon verifier normalizes inputs via `atom-to-digest`'s modular reduction; Rust does not. Off-field digests produce *different* digests on each side. Anywhere a Rust off-chain verification result feeds a Hoon-verified state (settlement effect, receipt bridge, future on-chain submission) creates a chainsplit primitive. C-04 (Boundary).
 
-The ZK-proof boundary itself appears tight: version pinning to `%2` blocks v0/v1 replay, `verify-settlement` binds STARK output to `expected-root` and `expected-hull`, and `verify-chunk` is domain-separated against `hash-pair`. The deterministic Schnorr-over-Cheetah signing layer mirrors the Hoon reference, range-checks scalars, and rejects zero nonces/challenges/signatures. The kernel JAM integrity gate (build-time sha256 baked in, runtime assert before boot) blocks the post-build tamper path; the `check-jam.sh` source-of-truth gate catches the pre-build tamper path.
+Additionally:
 
-No findings break the underlying STARK verifier math. No findings break the Merkle proof verification math. No findings let an unauthenticated attacker mint a fake settlement on-chain — the kernel-side `validate-settlement-args` chain holds. The Critical finding below is about the hull lying to its caller, not about chain attestation.
+4. **The CAIP-122 SIWN signer is field-injectable.** `build_caip122_message` interpolates `params.uri`, `params.nonce`, `params.chain_id`, etc. via `format!` with no newline/control-char filter. A signer routing user-influenced bytes into `uri` produces a body whose later lines (Chain ID, Nonce, Issued At, Expiration Time) the parser reads from the injected content, not from the signer's intended values. One legitimate victim signature mints a multi-decade impersonation token. The verifier compounds this by failing to enforce `chain_id`, `uri`, or `version` against any expected value — cross-chain replay is wide open. C-05, C-06, C-07 (Wallet).
 
-**Finding counts:** 1 Critical, 4 High, 9 Medium, 17 Low/Informational.
+5. **The vesl-nockup ↔ vesl-core mirror gate is undeployed.** `.github/workflows/vesl-core-sync.yml` exists on local `dev` but is absent from `origin/dev` and `origin/main` — verified by `git show origin/dev:...`. The supply-chain integrity contract (CLAUDE.md §7) that prevents "fixed in vesl-core, forgot to run sync.sh" drift is paper-only. Compounded by C4: even if deployed, the workflow's diff command would always fail (vesl-nockup carries 4 crates that don't exist in vesl-core, and `diff -rq` returns non-zero on "Only in" entries). And CI's `VESL_WALLET_PIN` env var points to a SHA that does not exist in `vesl-wallet`. C-08, C-09 (Nockup).
+
+Beyond the criticals, the report catalogs 22 High, 31 Medium, and 28 Low/Informational findings spread across all three repos. The **prior audit's prior findings (`AUDIT_REPORT.md` pre-this-cycle) are partially fixed**:
+
+| Prior | Status today | Notes |
+|---|---|---|
+| C-01 (hull commit desync) | **Migrated** — hull is now `vesl-nockup/crates/vesl-hull` library, prior C-01 surface re-shaped. C-01 *of this report* is independent. |
+| H-01 (STARK `test-mode`) | **Unfixed** — planning doc landed, code change did not. Promoted to C-02 here. |
+| H-03 (hash-leaf trailing-zero) | **Unfixed** — `hash-leaf` still untouched, no `hash-leaf-v2-domain` arm. Restated as M-09. |
+| H-04 (Schnorr message-uniqueness) | **Partially audited, not fixed** — annotations not landed; depends on H-03. |
+| M-03 (rejam_atom Result) | **Unfixed** — still `.expect("rejam_atom: input is not valid jam")`. Restated as H-12. |
+| M-07 (SIWN window cap) | **Unfixed** — still uses raw `expiration_time - issued_at`. Restated as H-13. |
+| M-08 (Schnorr `from_belts` overflow) | **Fixed in vesl-wallet@e270b00** — `if v > u32::MAX as u64 { return Err(ChunkOverflow(v)) }` present at `schnorr.rs:163`. **NOT fixed in the shim path** at `crates/vesl-signing/src/schnorr.rs:119-122` if a caller uses the legacy `from_belts(&[Belt;8])` constructor; restated as H-04. |
+| M-09 (demo signing key) | **Unfixed** — `is_demo_key` exists, exported, but invoked nowhere. Restated as H-15. |
+
+**Beta-ship gate:** at minimum, C-01 through C-09 must be fixed before a public beta. Several are one-line fixes; none should take more than a focused day.
+
+**Finding counts (2026-05-19):** **9 Critical, 22 High, 31 Medium, 28 Low / Informational, 4 cross-cutting hardening recommendations.**
 
 ---
 
 ## 2. Critical Vulnerabilities
 
-### C-01 — Hull `/commit` silently desynchronizes from kernel-registered root
+### C-01 — Kernel-integrity check is opt-in and never invoked; templates load `out.jam` from disk with zero verification
 
-**Severity:** Critical (integrity)
+**Severity:** Critical (kernel-substitution attack — silent integrity bypass)
+**Repo:** vesl-core (kernel crates) + vesl-nockup (templates)
 **Files:**
-- `hull/src/api.rs:339-401` (commit_handler)
-- `hull/src/api.rs:403-437` (settle_handler)
-- `protocol/lib/kernel-arms.hoon:17-23` (handle-register)
-- `protocol/lib/settle-kernel.hoon:78-83`
+- `vesl-core/kernels/guard/src/lib.rs:9,13`
+- `vesl-core/kernels/mint/src/lib.rs:9,13`
+- `vesl-core/kernels/settle/src/lib.rs:9,13`
+- `vesl-nockup/templates/{counter,data-registry,graft-hash-gate,graft-intent,graft-mint,graft-scaffold,graft-settle,settle-report,vesl}/src/main.rs` — every template loads via `fs::read("out.jam")`
+- `vesl-core/templates/*/src/main.rs` — same pattern in the canonical-source templates
 
-**Description.** The settle kernel's `%register` cause is single-shot per hull. `handle-register` returns `~` on duplicate hull, the calling kernel arm returns `[~ state]` (no effects, no state change), and slogs `'settle: hull already registered'`. The Rust hull's `commit_handler` constructs a `%register` poke on **every** call to `/commit` and discards the returned effect list with `let _effects = poke_kernel_with_timeout(...)`. It then unconditionally overwrites `st.fields` and `st.tree` with the new commitment and returns `status: "committed"` with the new Merkle root in the response body.
+**Description.** The kernels-* crates expose `pub static KERNEL: &[u8] = include_bytes!(env!("KERNEL_JAM_PATH"))` and `pub fn verify_kernel()` that sha256-checks the embedded bytes against `KERNEL_JAM_SHA256_HEX` (baked in at build time from the same file the include sees). The integrity gate exists. **`verify_kernel()` is never called anywhere in either repo.** Verified by `grep -rIn 'verify_kernel|kernels_guard|kernels_mint|kernels_settle' --include='*.rs' --exclude-dir=target` — returns only the definitions; no callers. The kernels-* crates themselves have no other consumers in any Cargo.toml in either repo.
 
-After the first successful `/commit` for a hull, every subsequent `/commit`:
-- silently fails kernel-side (empty effect list, no `%registered` emitted),
-- updates local Rust state to a root the kernel has not attested,
-- returns HTTP 200 with `merkle_root: <new_root>` to the caller,
-- and the `/verify` endpoint then validates proofs locally against this kernel-unrecognized root.
+The actual production code path: every shipped template loads its kernel via `let kernel = fs::read("out.jam")?; let app = boot::setup(&kernel, ...).await?;`. There is no integrity check, no signature verification, no sha256 comparison. The kernel JAM is whatever bytes happen to be at `out.jam` at process start.
 
-The `/settle` handler is the same anti-pattern but at least reports `settled: !effects.is_empty()` — which means once the first commit has registered, **every subsequent `/settle` call returns `settled: false`**, making the endpoint effectively unusable for its documented purpose ("settle a note against the current Merkle root").
+**Impact.** An attacker who can write to the deployment's working directory (filesystem misconfiguration, supply-chain compromise of a build artifact, careless `cp` overwrite, malicious CI step that replaces `out.jam` before `cargo run`, hostile docker-build layer) can swap in a kernel of their choosing. The application boots without complaint. From that point every poke is interpreted by attacker-controlled Hoon — including signing-key derivation arms, settlement guards, replay sets, RBAC checks.
 
-**Impact.**
-- Anyone trusting the hull's `/commit` response on a hull that has been committed to before is accepting a root with no kernel attestation. If the hull is the external face of a verified-commitment service, this breaks the integrity contract.
-- The hull's `/verify` endpoint will return `valid: true` against the unattested root because it verifies against the local `MerkleTree`, not the kernel's registered root.
-- The hull's `/settle` is permanently broken (after first /commit) for the "did the settlement land" success signal.
-- An operator with no visibility into the kernel's `slog` stream cannot detect this happened.
+The build.rs trust model (which the prior audit noted as L-01) is amplified: the build path's `KERNEL_JAM_PATH` env var trusts the build host; the *runtime* path trusts the filesystem at deploy time. Two trust assumptions, both unsecured.
 
 **Reproduction.**
 ```bash
-# Start hull
-HULL_API_KEY=k hull --bind-addr 127.0.0.1 --port 3000
-
-# First commit — succeeds
-curl -X POST localhost:3000/commit \
-  -H "Authorization: Bearer k" \
-  -d '{"fields":[{"key":"a","value":"1"}]}'
-# {"field_count":1,"merkle_root":"[...R1...]","status":"committed"}
-
-# Second commit with different fields — same hull_id=1, different root
-curl -X POST localhost:3000/commit \
-  -H "Authorization: Bearer k" \
-  -d '{"fields":[{"key":"a","value":"2"}]}'
-# {"field_count":1,"merkle_root":"[...R2...]","status":"committed"}
-# But kernel still has hull=1 registered to R1, NOT R2.
-
-# /settle reports settled=false now and forever
-curl -X POST localhost:3000/settle \
-  -H "Authorization: Bearer k" -d '{}'
-# {"settled":false,"effects_count":0,...}
+cd ~/projects/nockchain/vesl-nockup/templates/vesl
+# (Assuming a built artifact)
+cp /tmp/evil.jam out.jam  # arbitrary attacker-controlled JAM
+cargo run -- demo
+# Kernel boots from evil.jam with no error
 ```
 
-The kernel stderr contains `settle: hull already registered` after the second `/commit`, which is the only visible signal that anything is wrong.
+**Remediation.**
 
-**Remediation.** Three layered fixes, pick all three:
-
-1. **Check the effect list in `commit_handler`** (api.rs:391). Treat empty effects from a `%register` poke as failure:
+1. **Make `verify_kernel()` non-opt-in.** Remove the `pub static KERNEL` API. Replace with a lazy accessor that runs the sha256 check exactly once via `OnceLock` and aborts on mismatch:
    ```rust
-   let effects = poke_kernel_with_timeout(&mut st.app, register_poke, "register").await?;
-   if effects.is_empty() {
-       return Err((StatusCode::CONFLICT, Json(ErrorBody {
-           error: "hull root already registered; this hull is single-shot per process".into(),
-       })));
+   pub fn kernel() -> &'static [u8] {
+       static CHECKED: std::sync::OnceLock<&[u8]> = std::sync::OnceLock::new();
+       CHECKED.get_or_init(|| { verify_kernel(); KERNEL }).copy_from_slice_inplace_or_whatever()
    }
    ```
-2. **Add an explicit `%rotate-root` cause to the settle kernel** that overwrites `registered.state` and emits both `[%revoked hull old-root]` and `[%registered hull new-root]` effects. Document and gate it (e.g., require a signature from a designated rotation key tied to `hull_id`).
-3. **Don't re-register on `/settle`.** The hull's `/settle` should either (a) be removed because `/commit` is the only on-chain operation in the generic hull, or (b) call the settle kernel's actual `%settle` cause with a full `settlement-payload` (which goes through `validate-settlement-args` and emits a settled note effect). The current `/settle` is the worst of both worlds: it looks like settlement but does nothing past the first `/commit`.
+2. **Make every template consume the kernel through `kernels-{guard,mint,settle}::kernel()`** instead of `fs::read("out.jam")`. The JAM bytes ship in the binary; no disk read needed. This collapses both the disk-tamper and the build-time `KERNEL_JAM_PATH` env attack surfaces.
+3. **For templates that must accept an external JAM** (development scaffold path), require a `--expected-sha256 <hex>` CLI argument and verify before boot. The bare `fs::read("out.jam")` path must die.
+4. **Add a `KERNEL_JAM_SHA256_EXPECTED` build-time env var** for the kernel crates so release builds pin the expected sha256 out-of-band from the JAM file itself. CI's `jam-determinism.yml` already enforces this at PR time; baking it into build.rs is defense-in-depth.
+
+This is the single highest-leverage fix in the audit. Estimated effort: half a day across all templates and kernel crates.
 
 ---
 
-## 3. High Vulnerabilities
+### C-02 — STARK verifier `test-mode` parameter still flippable at production boundary (H-01 unfixed)
 
-### H-01 — STARK verifier `test-mode` is a runtime parameter, not proof-bound
+**Severity:** Critical (soundness bypass on one boolean parameter)
+**Repo:** vesl-core
+**Files:** `protocol/lib/vesl-stark-verifier.hoon:16,46,73,510`
 
-**Severity:** High (soundness footgun)
-**Files:**
-- `protocol/lib/vesl-stark-verifier.hoon:16,46,73,510`
-
-**Description.** Both `verify` and `verify-settlement` declare `=|  test-mode=_|` (default `%.n`) as a free parameter on the verifier door. The conditional at line 510:
+**Description.** Both `+verify` and `+verify-settlement` declare `=|  test-mode=_|` (default `%.n`) as a free parameter on the verifier door. The conditional at line 510:
 ```hoon
 ?:  &(=(test-mode %.n) !(verify-merk-proofs merk-proofs verifier-eny))
   ~&  %failed-to-verify-merk-proofs  !!
 ```
-means **Merk proof verification is skipped when `test-mode = %.y`**. The flag is not part of the proof, is not absorbed by the Fiat-Shamir transcript, and is not asserted at production call sites. The current `verify` and `verify-settlement` entrypoints pass `test-mode` through unchanged from the caller. A future driver, codegen pass, or test harness that flips this to `%.y` at a production call site silently disables Merkle opening verification for every proof.
+means **Merk-proof verification is skipped when `test-mode = %.y`**. The parameter is not absorbed into the Fiat-Shamir transcript. The fix (Option B from `docs/AUDIT_H01_TEST_MODE.md`) is two `?>  =(test-mode %.n)` asserts — one at line 17, one at line 47.
 
-**Impact.** A single-bit slip at any call site reduces the STARK to "proof of well-formed transcript" with no commitment to the actual evaluation domain. An attacker who could trigger `test-mode = %.y` would produce arbitrary `proof.merk-data` accepted as valid.
+**Verification.** `grep -nE 'test-mode' protocol/lib/vesl-stark-verifier.hoon` shows 9 occurrences, none of which are the planned hard-assert. The remediation was documented 30+ days ago and is not in `dev`.
 
-**Remediation.**
-- Remove `test-mode` from the production `verify-door` instance entirely.
-- If test infrastructure still needs to skip Merkle verification, expose a separate `verify-test-only` arm that production kernels never reach.
-- Alternatively, add `?>  =(test-mode %.n)` as the first line of `verify` / `verify-settlement` to fail-closed; this loses the test-skip capability but is the safer default.
+**Impact.** A single-bit slip at any future call site reduces the STARK to "well-formed transcript" with no commitment to the actual evaluation domain. Any caller that accidentally constructs the verifier door with `test-mode=%.y` (codegen pass, copy-paste, downstream wiring error) silently accepts arbitrary `proof.merk-data`.
 
-### H-02 — STARK verifier known constraint-completeness TODO (C-lead-2)
+**Remediation.** Land Option B from `AUDIT_H01_TEST_MODE.md` verbatim. Two lines:
+```hoon
+++  verify
+  =|  test-mode=_|
+  |=  [=proof override=(unit (list term)) verifier-eny=@ s=* f=*]
+  ^-  ?
+  ?>  =(test-mode %.n)                          :: ADD
+  ?>  ?=(%2 version.proof)
+  ...
 
-**Severity:** High (self-documented soundness concern)
-**Disposition:** **DEFERRED** — see §7. Requires STARK-fluent reviewer; revisit when re-applying the `stark-proof-stash` work against the post-upstream-fix verifier shape.
-**Files:** `protocol/lib/vesl-stark-verifier.hoon:160-167`
+++  verify-settlement
+  =|  test-mode=_|
+  |=  [=proof override=(unit (list term)) verifier-eny=@ s=* f=* expected-root=@ expected-hull=@]
+  ^-  ?
+  ?>  =(test-mode %.n)                          :: ADD
+  ?>  ?=(%2 version.proof)
+  ...
+```
 
-**Description.** The verifier source itself flags an unresolved soundness question:
-
-> TODO: AUDIT 2026-04-17 C-lead-2 — verifier completeness / perf TODO
-> Perf optimization sits next to soundness-critical challenge derivation. Any dropped constraint on this path is a silent soundness hole. Do not land the perf fix without a second reviewer fluent in STARK constraint systems and a constraint-count invariant test that asserts absorbed challenges == expected challenges.
-
-The audit cannot resolve this independently — it requires a second STARK-fluent reviewer per the author's own note. Flagging here so it's not lost in the source.
-
-**Remediation.** Block any change to the challenge-derivation block on (a) a second STARK-fluent reviewer's signoff and (b) a regression test that counts absorbed challenges vs. expected per round and fails on drift.
-
-### H-03 — Trailing-zero hash collision in `hash_leaf`
-
-**Severity:** High (when leaves are user-controllable, byte-length is semantic, and length-prefixing is not enforced)
-**Files:**
-- `crates/nockchain-tip5-rs/src/lib.rs:131-161` (atom_bytes_to_belts)
-- `protocol/lib/vesl-merkle.hoon:38-52` (split-to-belts)
-
-**Description.** The Rust and Hoon sides of `hash_leaf` strip trailing zero bytes from the input before chunking into 7-byte Belts. This is intentional cross-VM alignment (Hoon atoms are bignums; `0x05` and `0x05 0x00 0x00` are the same value) and is documented:
-
-> Callers that treat byte-length as distinguishing between logically-distinct payloads **will see hash collisions**. Fix: encode length into the payload explicitly — e.g. prepend a 4-byte length field, or add a domain-separating prefix before hashing.
-
-**Impact.** Every Merkle leaf in the system uses raw `hash_leaf(bytes)`. If a caller's leaf encoding has variable trailing-zero-significance, an attacker can claim alternate preimages that hash to the same digest. Affected surfaces:
-- RAG chunk content (`chunk.dat` is `@t` — UTF-8 text, but in principle can end in `\0` if a producer encodes binary blobs as cords).
-- Key-value graft entries (kv-graft stores `@` values).
-- The `register_poke` builders' hull-id and root encoding (less concerning — hashes of fixed-width digests).
-- Attestation data passed to `sig-verify-ed25519` / `sig-verify-schnorr` (where `expected-root = hash-leaf(pubkey)`).
-
-The `sig-verify-schnorr` binding is particularly worth noting: the gate computes `(hash-leaf pubkey)` and compares it to `expected-root`. Two pubkey atoms that share canonical bignum form but differ only in tail-pad bytes hash to the same root. The 97-byte canonical pubkey serialization is fixed-width and ends in `0x01`, so this specific path is safe — but the general primitive isn't.
-
-**Remediation.**
-- Length-prefix every leaf at the SDK layer: `hash_leaf_v2(data) = hash_leaf([len_be4(data), data].concat())`.
-- Add a `hash_leaf_domain(domain_tag, data)` helper to vesl-merkle.hoon and the Rust mirror, modeled on `tip5_with_domain` (which already does this correctly).
-- Audit `hash_leaf` call sites in vesl-gates.hoon: anywhere a user-controllable atom is the input, switch to the domain-separated form.
-
-### H-04 — Schnorr deterministic-nonce contract requires distinct messages per logical document
-
-**Severity:** High (cryptographic, contractual)
-**Files:**
-- `crates/vesl-core/src/signing.rs:219-235` (documented)
-- `vesl-nockup/crates/vesl-signing/src/schnorr.rs:220-256`
-
-**Description.** Both Rust signers derive the nonce as `trunc_g_order(hash_varlen(pk.x | pk.y | message | sk))`. This matches the Hoon reference and is correct deterministic Schnorr — but the security argument requires every signing call for a given key to use a **distinct `message` value**. The signing layer adds no randomness on behalf of the caller; if a caller signs two different logical documents that happen to hash to the same 5-Belt digest, the security argument is gone.
-
-The crate documents this:
-
-> Security is only preserved if every call for a given key uses a **distinct** `message` value. Re-signing the same logical document is safe (same signature = no new entropy leaked). Signing two different logical documents that happen to hash to the same `message` is not — and any caller that lets the message be chosen (or reused) adversarially breaks the signature scheme.
-
-**Impact.** Whether this is exploitable depends on the call sites:
-- **`schnorr_message_digest_for_data`** (signing.rs:205) hashes the input through `nockchain_tip5_rs::hash_leaf`, which has the trailing-zero collision from H-03. Two `data` values differing only in trailing zeros produce the same digest and thus the same signature. If a caller signs `commit_a` and `commit_a\0` thinking they're distinct, the signatures match — which is correct deterministic behavior, but means equal-signature can no longer be used as a freshness signal.
-- **SIWN** (caip122.rs) constructs the message body via `build_caip122_message` and hashes via `tip5_with_domain`. The body includes a `Nonce` field, which the replay cache enforces unique. OK.
-- **The settlement-payload signing** (settle.rs `sign_tx`) signs `kernel_sig_hash` which is computed by the Hoon kernel from `(seeds, fee)`. As long as `seeds` includes a unique parent_hash per transaction, distinct.
-
-**Remediation.**
-- Audit every signing call site in vesl-core, vesl-nockup, and downstream apps (`hull-llm`, x402-nockchain) for message uniqueness.
-- Where the message space could be attacker-shaped, prepend a fresh nonce or include a strictly-increasing counter in the pre-image.
-- Document this contract at every `sign(...)` call site as a comment naming the freshness source.
+Then regenerate `assets/{guard,mint,settle}.jam` and `assets/CHECKSUMS.sha256` per CLAUDE.md §3.
 
 ---
 
-## 4. Medium Vulnerabilities
+### C-03 — `forge-kernel.hoon` and `vesl-kernel.hoon` `%prove` treat `prove-result %| err` as success; permanently settle on prover error
 
-### M-01 — Global rate limit; no per-IP backpressure
+**Severity:** Critical (fake settlement via prover error path)
+**Repo:** vesl-core
+**Files:**
+- `protocol/lib/forge-kernel.hoon:256-272`
+- `protocol/lib/vesl-kernel.hoon:106-117` (`handle-prove`)
 
-**Files:** `hull/src/api.rs:262-269`
+**Description.** `prove-computation` returns `prove-result = (each =proof err=prove-err)` where `prove-err` includes `[%too-big heights=(list @)]` (defined in `nockchain/hoon/common/stark/prover.hoon:39-40`). The kernel wraps the call in `mule` and checks only `-.proof-attempt` — the *outer* mule head (`%&` = mule didn't crash). It does NOT check `-.p.proof-attempt` — the *inner* `each` head distinguishing `[%& proof]` from `[%| err]`.
 
-`tower::ServiceBuilder` configures `rate_limit(200, 60s)` as a global bucket. A single attacker exhausts the bucket and the hull returns `429` to every other client. The hull is the only public face of a Vesl deployment; sustained DoS knocks it offline.
+In `forge-kernel.hoon`:
+```hoon
+=/  proof-attempt
+  %-  mule  |.
+  (prove-computation belt-digest fs-formula expected-root.args hull.note.args)
+?.  -.proof-attempt              :: only checks mule outer head
+  ~>  %slog.[3 'forge: prove-computation crashed']
+  ~[[%prove-failed (jam p.proof-attempt)]]
+=/  new-settled  (~(put in settled.state) id.note.args)
+:_  state(settled new-settled)
+~[[result-note p.proof-attempt]]  :: p.proof-attempt may be [%| %too-big ...]
+```
 
-**Remediation.** Use `tower-governor` or upstream proxy (nginx `limit_req_zone`, AWS WAF, Cloudflare) for per-IP buckets.
+When `prove-computation` returns `[%| %too-big heights=...]` without crashing, the outer mule head is `%&`, the kernel falls through to the "settled" branch, marks `note.id` as settled permanently (replay protection now blocks any future legitimate settle of the same id), and emits `[result-note (%| %too-big ...)]` as the proof effect.
 
-### M-02 — `poke_kernel_with_timeout` discards effect contents
+**Impact.** Attacker submits a payload structured to trigger `prove-computation`'s `[%| %too-big ...]` return path (any path inside `generate-proof` that yields the error variant without crashing). Result:
 
-**Files:** `hull/src/api.rs:282-313`
+1. `note.id` is permanently in the settled set — the legitimate party cannot settle the same note ever.
+2. The emitted effect contains a noun that is structurally `(proof, err-payload)`, which downstream Rust callers may cast as a proof (especially if they accept the head without sieving the `each` variant) and either crash on unexpected shape or accept the err-noun as "proof bytes."
 
-`commit_handler` calls `poke_kernel_with_timeout(...)?` and binds the result to `_effects`. The kernel's `%register` returns empty effects on duplicate hull (see C-01) and non-empty on success. The hull's silent-success path conflates the two. Same handler also has no schema check on the effect — a future kernel update that changes the `%registered` payload shape goes unnoticed.
+The state corruption is silent: the kernel slog says nothing.
 
-**Remediation.** Pattern-match the first effect's head tag against `%registered` and return 5xx if mismatched, in addition to the C-01 fix.
+**Verification.** Confirmed by reading `forge-kernel.hoon:256-271`, `vesl-kernel.hoon:106-117`, and `nockchain/hoon/common/stark/prover.hoon:39-40`. The `prove-result` shape is genuinely `(each proof err)`. The mule check is genuinely only on the outer head.
 
-### M-03 — `rejam_atom` panics on invalid input
+**Remediation.**
+```hoon
+=/  proof-attempt
+  %-  mule  |.
+  (prove-computation belt-digest fs-formula expected-root.args hull.note.args)
+?.  -.proof-attempt
+  ~>  %slog.[3 'forge: prove-computation crashed']
+  :_  state
+  ~[[%prove-failed (jam p.proof-attempt)]]
+?.  ?=(%& -.p.proof-attempt)                    :: sieve the each variant
+  ~>  %slog.[3 'forge: prover returned error variant']
+  :_  state
+  ~[[%prove-failed (jam p.proof-attempt)]]
+=/  the-proof  +.p.proof-attempt                :: cast through %&
+=/  new-settled  (~(put in settled.state) id.note.args)
+:_  state(settled new-settled)
+~[[result-note the-proof]]
+```
 
-**Files:** `crates/nock-noun-rs/src/lib.rs:187-192`
+Mirror in `vesl-kernel.hoon:106-117` (`handle-prove`).
 
-`rejam_atom` is reachable from the cross-graft cue-then-jam canonicalization path (queue → batch/log/registry). Its panic-on-invalid-jam policy crashes the Rust process if a kernel ever emits a malformed atom as a queue body. Currently the v0.1 kernels only produce jam-valid bodies, but the boundary is a `&[u8]` and the panic is `expect("rejam_atom: input is not valid jam")`.
+---
 
-**Remediation.** Change signature to `Result<Vec<u8>, RejamError>`. Callers can then panic with their own context or surface as a kernel-decode error.
+### C-04 — `Tip5Hash` limbs are unconstrained at the Rust API surface; release builds bypass field-membership checks → chainsplit primitive
 
-### M-04 — Settle kernel `settled` set grows unboundedly
+**Severity:** Critical (cross-VM divergence — Rust and Hoon disagree on identical bytes)
+**Repo:** vesl-core
+**Files:**
+- `crates/nockchain-tip5-rs/src/lib.rs:48` (type alias `Tip5Hash = [u64; 5]`)
+- `crates/nockchain-tip5-rs/src/lib.rs:166,179,190` (`hash_leaf`, `hash_pair`, `verify_proof`)
+- `crates/nockchain-client-rs/src/note_data.rs:147-169` (`find_hash_entry`)
+- `crates/nockchain-client-rs/src/types.rs:76-84` (`chain_hash_from_pb`)
+- Upstream: `nockchain/crates/nockchain-math/src/belt.rs:87` (`based!` macro = `debug_assert!`)
 
-**Files:** `protocol/lib/settle-kernel.hoon:24` and `forge-kernel.hoon:27`
-
-`settled=(set @)` accumulates every settled note ID for the kernel's lifetime. There is no GC, no epoch cutoff, and no max-size cap. A long-running kernel that settles many notes pays O(log N) cost per replay check and consumes linearly-growing state. The JAM-replay of the kernel state on startup also grows.
-
-**Remediation.** Either (a) introduce an epoch system where settled IDs older than N epochs are pruned and replay protection becomes "within current epoch", or (b) cap the set at MAX and evict oldest, or (c) accept the unbounded growth and document the deployment lifecycle.
-
-### M-05 — Replay cache (vesl-signing) is in-memory and not persisted
-
-**Files:** `vesl-nockup/crates/vesl-signing/src/replay_cache.rs`
-
-The `InMemoryReplayCache` is volatile. Restart = forget all observed nonces. An attacker who captures a SIWN header before a facilitator restart can replay it after. ADR-0010 (deferred) notes this; flagging explicitly because facilitators that handle real auth flows MUST address it before going to mainnet.
-
-**Remediation.** Implement a `RedisReplayCache` / `SqlReplayCache` and bind it to the facilitator's persistence layer.
-
-### M-06 — Replay cache has no max-size cap; full sweep on every `seen()`
-
-**Files:** `vesl-nockup/crates/vesl-signing/src/replay_cache.rs:67-86`
-
-`sweep` iterates the entire HashMap on every `seen()` call. Under flood, the cache grows until OOM. The sweep cost becomes O(N) per call.
-
-**Remediation.** Add `max_entries` and evict LRU/oldest beyond cap. Move sweep to a background task on an interval, not the hot path.
-
-### M-07 — SIWN replay-cache window controlled by signed message
-
-**Files:** `vesl-nockup/crates/vesl-signing/src/caip122.rs:261-263`
-
-`verify` computes the replay TTL as `params.expiration_time - params.issued_at`. The signer controls both fields. A client setting `issued_at = 1970-01-01` and `expiration_time = 2099-01-01` requests the cache hold the nonce for ~130 years. The `params.expiration_time <= now` check ensures the message is current, but the cache still tracks the nonce for the requested window.
-
-**Remediation.** Cap the window at a server-side maximum (e.g., 1 hour) before passing to `cache.seen(&key, window.min(MAX_SIWN_WINDOW))`.
-
-### M-08 — Schnorr `from_belts` silently truncates Belt high bits
-
-**Files:** `vesl-nockup/crates/vesl-signing/src/schnorr.rs:119-122`
-
+**Description.** `nockchain-math`'s `based!` macro is `debug_assert!`:
 ```rust
-pub fn from_belts(belts: &[Belt; 8]) -> Result<Self, SchnorrError> {
-    let chunks: [u32; 8] = std::array::from_fn(|i| belts[i].0 as u32);
-    Self::from_t8(&chunks)
+macro_rules! based {
+    ($x:expr) => {
+        debug_assert!($crate::belt::based_check($x), "element must be inside the field\r");
+    };
 }
 ```
-The `as u32` cast drops bits 32-63 of each Belt. The doc comment says callers MUST supply values that fit in u32, but the runtime check is absent. A caller violating the contract gets a silently-different key.
+In release builds, `debug_assert!` compiles to nothing. Every field operation in nockchain-math (`mont_reduction`, `add_mod`, `mul_mod`, etc.) skips the range check.
 
-**Remediation.** `let v = belts[i].0; if v > u32::MAX as u64 { return Err(SchnorrError::ChunkOverflow(v)); } let c = v as u32;`
+`nockchain-tip5-rs::hash_pair` constructs `Belt(v)` for each limb of its input arrays and calls `hash_10` without verifying `v < PRIME`. `verify_proof` constructs `node.hash` and `cur` from the proof's `ProofNode` structures, which carry raw `[u64; 5]` limbs. The optional `serde::Deserialize` derive (line 61) accepts any `u64` per limb. Externally-controlled paths to `Tip5Hash`:
+- `find_hash_entry` (`note_data.rs:147-169`) — reads u64 limbs from `NoteData` entries off the wire.
+- `chain_hash_from_pb` (`types.rs:76-84`) — converts protobuf bytes to limbs.
+- Direct API consumers calling `hash_pair` / `verify_proof` with caller-constructed arrays.
 
-### M-09 — Demo signing key is hardcoded and constant
+The Hoon side normalizes inputs via `atom-to-digest` which uses `dvr buffer p` (modular reduction). So the same `(u64 limbs ≥ PRIME)` input produces different digests on each side:
+- Rust release build: limbs ≥ PRIME flow through `montify` and `mont_reduction` without reduction, producing a deterministic-but-wrong result.
+- Hoon: limbs ≥ PRIME are reduced mod p first, producing the "canonical" result.
 
-**Files:** `hull/src/signing.rs:18-23,28`
+**Impact.** Anywhere a Rust off-chain verification result is treated as authoritative — settlement effects, off-chain receipts, anything bridging to a Hoon-verified state — Rust and Hoon disagree on identical inputs. An attacker who can post a digest with off-field limbs on-chain (via any `NoteData` write path, or via direct gRPC interaction with the chain client) creates a state where the two VMs reach different conclusions about the same bytes. **This is a chainsplit primitive.**
 
-`demo_signing_key()` returns `sk[0]=12345, sk[1]=67890`. The PKH is exported as `DEMO_KEY_PKH_BASE58`. The function `is_demo_key()` exists but is not used to refuse demo-key signing in dumbnet mode (only `resolve_dumbnet` is documented as requiring a real key, but it does not check `is_demo_key`).
+In debug builds the assert fires and the issue is loud. In release (the only build that ships to production) it is silent.
 
-If a developer copies the fakenet config to dumbnet by mistake, every signed settlement is signed with a publicly-known key. Anyone can forge transactions appearing to come from that hull.
+**Verification.** Confirmed `based!` is `debug_assert!` at `nockchain/crates/nockchain-math/src/belt.rs:87`. Confirmed Rust API construction paths at `find_hash_entry:163-165` (just calls `as_u64()` with no range check) and `chain_hash_from_pb` (no range check). Confirmed `Tip5Hash` is a raw type alias with no constructor invariant.
 
-**Remediation.** In `SettlementConfig::resolve_dumbnet`, after deriving `sk`, refuse if `is_demo_key(&sk)` is true.
+**Remediation.**
+
+1. **At every entry point that materializes `Tip5Hash` from external bytes, range-check each limb.** Wrap the type:
+   ```rust
+   #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+   pub struct Tip5Hash([Belt; 5]);
+   impl Tip5Hash {
+       pub fn from_limbs(limbs: [u64; 5]) -> Result<Self, FieldRangeError> {
+           for &l in &limbs { if l >= PRIME { return Err(FieldRangeError(l)); } }
+           Ok(Self(limbs.map(Belt)))
+       }
+       pub fn from_limbs_unchecked(limbs: [u64; 5]) -> Self {
+           Self(limbs.map(Belt))
+       }
+   }
+   ```
+   Route every external entry through `from_limbs`; only internal hash-output paths use `_unchecked`.
+
+2. **Audit every existing call site** that builds a `Tip5Hash` from `u64`s, including: `note_data.rs:163-165`, `types.rs:76-84`, every test, and every downstream consumer in vesl-core / vesl-nockup / vesl-wallet that constructs limbs from non-hash sources.
+
+3. **Add a release-mode integration test** that posts an off-field digest and asserts the verifier rejects (rather than computing a different digest).
+
+4. **File an upstream issue** at nockchain to promote `based!` from `debug_assert!` to `assert!`, or document explicitly that downstream callers MUST range-check before invoking any belt arithmetic. Don't wait on upstream — fix it at the vesl-core boundary now.
+
+---
+
+### C-05 — CAIP-122 SIWN message body is field-injectable via unsanitized `params.uri` / `params.nonce` / etc.
+
+**Severity:** Critical (single victim signature mints attacker-impersonation token)
+**Repo:** vesl-wallet
+**Files:**
+- `crates/vesl-signing/src/caip122.rs:95-119` (`build_caip122_message`)
+- `crates/vesl-signing/src/caip122.rs:123-163` (`parse_caip122_message`)
+- `crates/vesl-signing/src/caip122.rs:222-278` (`verify`)
+
+**Description.** `build_caip122_message` constructs the SIWN body via plain `format!` interpolation. None of `p.uri`, `p.nonce`, `p.chain_id`, `p.version`, `p.domain` are scrubbed for `\n` / `\r` / control bytes before splicing. The parser at `parse_caip122_message` is line-based via `str::lines()` and reads exactly 8 fields in order.
+
+An attacker who can shape any one of those fields — most plausibly `uri`, but `nonce` and `chain_id` are also caller-influenced in many login flows — can embed:
+```
+"\nVersion: 1\nChain ID: attacker-chain\nNonce: attacker-nonce\nIssued At: 2026-01-01T00:00:00Z\nExpiration Time: 2099-01-01T00:00:00Z"
+```
+inside the URI value. The parser reads the legitimate `Version`/`Chain ID`/`Nonce`/`Issued At`/`Expiration Time` lines from the *attacker-controlled* injected content; the signer's intended values land on lines the parser never reaches.
+
+The signature covers the full body, so it verifies. `params.address` (line 2 of body) is untouched by the injection. The replay cache stores the attacker-controlled nonce. Net effect: one legitimate victim signature → an SIWN bundle that the verifier accepts as authenticating the victim's address, bound to an arbitrary chain_id, with an expiration 80+ years in the future.
+
+**Verification.** Confirmed by reading `build_caip122_message:95-119` (no sanitization) and `parse_caip122_message:123-163` (line-based, reads exactly 8 fields, ignores trailing content).
+
+**Remediation.**
+
+1. **Reject control characters in every field at build time.** Add a `validate_field(name, value)` helper that returns `Err` on any character `< 0x20` or `== 0x7F`. Call it for `domain`, `address`, `uri`, `version`, `chain_id`, `nonce`, and the formatted timestamps before `format!`.
+2. **Make the parser strict.** Assert `_blank.is_empty()`. Assert `lines.next().is_none()` after `Expiration Time`. Reject any body that doesn't round-trip through `build → parse → build`.
+3. **Add a property test** that fuzzes arbitrary unicode into every `SiwnParams` field and verifies `build → parse → build` is the identity OR rejects at build.
+
+---
+
+### C-06 — SIWN replay cache key is `(nonce)` only; no binding to `chain_id`, `address`, `uri`, or message digest
+
+**Severity:** Critical (cross-chain / cross-resource replay)
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/caip122.rs:267`
+
+**Description.** `verify` builds the replay key as `prefixed(replay_domains::SIWN, params.nonce.as_bytes())`. The cache key is just the SIWN domain prefix + the nonce string. Nothing in the key binds to:
+- `chain_id` (so a mainnet signature replays against testnet),
+- `address` (so a captured signature replays against another address using the same nonce, if one exists),
+- `uri` (so a `/login` signature replays against `/admin/payouts`),
+- the message digest itself.
+
+Per CAIP-122 §3.2 and SIWN spec, replay protection MUST bind the signature to all four. The current implementation provides per-nonce uniqueness only.
+
+**Impact.** Combined with C-05 (which lets the attacker shape the nonce) and C-07 (which doesn't enforce `chain_id`/`uri`/`version`), this is the second leg of full SIWN bypass. Even without C-05, an attacker who captures a bundle on `api.example.com:mainnet` can present it to `api-testnet.example.com:testnet` if both share the `domain` string (or to a future-shared-cache deployment where the nonce is what's deduplicated, not the binding context).
+
+**Remediation.** Key the cache on a hash of the full signed body or, equivalently, the Tip5 digest already computed at line 258:
+```rust
+let digest = tip5_with_domain(SIWN_DOMAIN_SEPARATOR, bundle.message.as_bytes());
+schnorr_verify(&pk, &digest, &chal, &sig).map_err(|_| SiwnError::BadSignature)?;
+// ...
+let key = prefixed(replay_domains::SIWN, &tip5_to_bytes(&digest));
+if cache.seen(&key, window) { return Err(SiwnError::Replay); }
+```
+Either format works; the point is the cache key includes everything the signature binds to.
+
+---
+
+### C-07 — `verify` does not validate `chain_id`, `uri`, or `version` against expected deployment values
+
+**Severity:** Critical (cross-chain replay; spec-required defense missing)
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/caip122.rs:222-278`
+
+**Description.** `verify(header, expected_domain, cache, now)` checks only `params.domain == expected_domain` and the timestamp window. `params.chain_id`, `params.uri`, and `params.version` are parsed into `SiwnParams` but never compared against any expected value. A signature legitimately produced for `chain_id=nockchain:mainnet, uri=https://api.example.com/login, version=1` is accepted unchanged by a verifier deployed at `chain_id=nockchain:testnet, uri=https://api.example.com/admin/payouts, version=2` — provided both verifiers share the `domain` string.
+
+Per CAIP-122 §3.2, the verifier MUST validate the chain_id matches its expected chain. This is the spec's primary cross-chain replay defense.
+
+**Remediation.** Add expected-value parameters to `verify`:
+```rust
+pub struct SiwnVerifyContext<'a> {
+    pub expected_domain: &'a str,
+    pub expected_chain_id: &'a str,
+    pub expected_uri: &'a str,
+    pub expected_version: &'a str,
+}
+pub fn verify<C: ReplayCache>(
+    header_b64: &str,
+    ctx: &SiwnVerifyContext<'_>,
+    cache: &C,
+    now: DateTime<Utc>,
+) -> Result<VerifiedIdentity, SiwnError> { ... }
+```
+Reject mismatches with explicit `ChainIdMismatch` / `UriMismatch` / `VersionMismatch` errors. Audit every call site of `verify` across vesl-core, vesl-nockup, and any downstream consumer and supply the per-deployment expected values.
+
+---
+
+### C-08 — `vesl-core-sync.yml` workflow is not deployed on `origin/dev` or `origin/main` — supply-chain mirror gate is paper-only
+
+**Severity:** Critical (CI gate that prevents downstream-template drift is not active)
+**Repo:** vesl-core
+**File:** `.github/workflows/vesl-core-sync.yml`
+
+**Description.** The workflow file exists on local `dev` but is absent from both `origin/dev` and `origin/main`. Verified:
+```bash
+$ git show origin/dev:.github/workflows/vesl-core-sync.yml
+fatal: path '.github/workflows/vesl-core-sync.yml' exists on disk, but not in 'origin/dev'
+$ git show origin/main:.github/workflows/vesl-core-sync.yml
+fatal: path '.github/workflows/vesl-core-sync.yml' exists on disk, but not in 'origin/main'
+```
+Per CLAUDE.md §7 and `AUDIT_FOLLOWUP_INDEX.md`, this workflow is the gate that prevents "fixed in vesl-core, forgot to run sync.sh in vesl-nockup" drift. With the gate undeployed, any vesl-core PR landing changes to `crates/*` reaches `main` without verifying that vesl-nockup has been re-synced. Downstream users pulling vesl-nockup templates get stale or hand-edited crate code that doesn't match what vesl-core says shipped.
+
+**Remediation.** Push the workflow to `origin/dev` and `origin/main`. After push, run `gh workflow list` to confirm the workflow is registered. Trigger a manual PR to verify it runs and the diff command works (see C-09).
+
+---
+
+### C-09 — Even if deployed, `vesl-core-sync.yml`'s diff command is structurally broken (always fails); CI pins disagree with sync.sh, one is non-existent
+
+**Severity:** Critical (CI gate, if deployed, would either always fail or check the wrong SHAs)
+**Repo:** vesl-core + vesl-nockup
+**Files:**
+- `vesl-core/.github/workflows/vesl-core-sync.yml:42` (broken diff)
+- `vesl-nockup/.github/workflows/ci.yml:17-18` (CI pins)
+- `vesl-nockup/sync.sh:43,49` (sync.sh pins)
+
+**Description.** Two compounding issues:
+
+1. **Diff command is asymmetric-incompatible.** The vesl-core sync workflow uses `diff -rq vesl-core/crates vesl-nockup/crates`. But vesl-nockup contains 4 crates (`vesl-hull`, `vesl-signing`, `vesl-wallet`, `vesl-wallet-spec`) that do not exist in vesl-core. `diff -rq` returns exit 1 on "Only in" entries, so the gate would always fail — masking the actual drift signal in noise. The semantic the gate needs is: every file in `vesl-core/crates` must exist byte-identical under `vesl-nockup/crates/`; extra files in vesl-nockup are OK.
+
+2. **CI pins are wrong.** Vesl-nockup's CI declares:
+   - `VESL_CORE_PIN=9e527a947860d66782fb7b3ede3b42ee085559f0` (5 days behind sync.sh's `e141265b...`)
+   - `VESL_WALLET_PIN=12c2e447e95a96bd99c39ed81b8bf6a8b07cb0d8` — verified via `git cat-file -t`: this SHA does not exist in the vesl-wallet repo.
+
+   So the `sync-verify` job either fails on `actions/checkout` ("could not find ref") or, if the ref happens to exist somewhere, hits `sync.sh`'s `check_sibling_pin` tripwire and aborts before verifying anything.
+
+**Remediation.**
+
+1. **One-way diff:** rewrite the gate's diff loop to walk `vesl-core/crates` and assert each file matches its counterpart under `vesl-nockup/crates/`. Or simpler: run `vesl-nockup/sync.sh --verify` against the PR's vesl-core HEAD — that's the canonical contract anyway.
+2. **Align pins:** update `vesl-nockup/.github/workflows/ci.yml`'s `VESL_CORE_PIN` and `VESL_WALLET_PIN` to match `vesl-nockup/sync.sh`. Add a fast pre-flight `git ls-remote` step in the workflow to catch non-existent SHAs before checkout fails opaquely.
+
+---
+
+## 3. High Severity
+
+### H-01 — Production Hoon kernels lack capacity caps on `registered` and `settled` maps
+
+**Repo:** vesl-core
+**Files:**
+- `protocol/lib/kernel-arms.hoon:17-23` (`handle-register`)
+- `protocol/lib/settle-kernel.hoon:30-32, 99-101`
+- `protocol/lib/vesl-kernel.hoon:40-44, 113-115`
+- `protocol/lib/forge-kernel.hoon:22-27, 269`
+
+The audit comments labeled `AUDIT 2026-04-17 H-02` added 10M caps to every graft library (`mint-graft`, `guard-graft`, `settle-graft`, `kv-graft`, etc.) — but `kernel-arms.hoon`'s `+handle-register` and the production kernels themselves have NO cap. The shipped guard/mint/settle/vesl/forge kernels are what compile to the JAM artifacts. The grafts protect downstream app composers; the production kernels are exposed.
+
+Production `settled` set never rotates. `settle-graft.hoon` rotates at 1M settles; production `settle-kernel.hoon`, `vesl-kernel.hoon`, `forge-kernel.hoon` have unbounded `set @`. Each successful settle grows kernel state permanently.
+
+**Attack:** Adversary with poke access calls `%register` with distinct `hull` IDs 10⁶ times; the registered map grows linearly, eventually exhausting Nock stack.
+
+**Fix:** Lift caps from grafts into `kernel-arms.hoon` and the production kernels. See Hoon audit body for sketch.
+
+---
+
+### H-02 — `vesl-entrypoint.hoon` bypasses all settlement guards (registration, root match, replay)
+
+**Repo:** vesl-core
+**File:** `protocol/lib/vesl-entrypoint.hoon:33-38`
+
+The "STAGED" entrypoint arm directly calls `settle-note` with `expected-root.args` and the manifest, both attacker-controlled. No `registered` check, no `expected-root` cross-check, no replay set, no `note.root == expected-root` check. The arm produces a `[id=@ hull=@ root=@ state=[%settled ~]]` for any hull/id the attacker chooses, indistinguishable at the type level from a legitimate settlement.
+
+Latent today (no shipped kernel composes `vesl-entrypoint`), but one `/+` import away from production. The `:: STAGED:` header tag is documentation, not a guard.
+
+**Fix:** Move to `protocol/tests/`, or make the arm bang (`!!`) with a STAGED trace, or wire in the full `validate-settlement-args` check.
+
+---
+
+### H-03 — `forge-kernel.hoon` `%settle`/`%prove` `verify-chunk` depth-cap crashes the kernel poke instead of emitting a typed error
+
+**Repo:** vesl-core
+**Files:** `protocol/lib/forge-kernel.hoon:128-133, 219-224`; `protocol/lib/vesl-merkle.hoon:119-121`
+
+`verify-chunk` returns `%.n` on >64-depth proofs (depth-cap). In `forge-kernel.hoon`'s %settle/%prove arms, this `%.n` is consumed inside `?>` — converting "verify failed" into `!!`. The kernel poke crashes; the operator sees a panic indistinguishable from a real bug.
+
+**Fix:** Replace the inline `?>` verify-loop with a mule-wrapped variant emitting `%settle-error 'forge: leaf verify failed'`.
+
+---
+
+### H-04 — vesl-core's shim `from_belts([Belt; 8])` silently truncates high bits (M-08 fixed in vesl-wallet, NOT in vesl-core)
+
+**Repo:** vesl-core
+**File:** `crates/vesl-signing/...` — but vesl-core consumes vesl-signing via patch. The actual fix at `vesl-wallet/crates/vesl-signing/src/schnorr.rs:163` (rejects `v > u32::MAX`) is correct. However: vesl-core has its own `signing.rs::nock_belts8_to_vesl` (`crates/vesl-core/src/signing.rs:121`) that constructs the belts vector before passing to `SchnorrPrivateKey::from_belts`. If a caller routes attacker-influenced `[Belt; 8]` through `derive_pubkey`, the per-belt range is not checked at the vesl-core boundary — the check happens in vesl-signing, but only catches `v > u32::MAX`, not arbitrary out-of-G_ORDER scalars.
+
+**Fix:** Verify each `Belt(v)` is `v <= u32::MAX` in `nock_belts8_to_vesl`. Audit all callers that derive their `[Belt; 8]` from non-wallet sources (HMAC outputs, manually constructed test fixtures, anything via the FFI).
+
+---
+
+### H-05 — `RagVerifier::verify` ignores `note_id` despite the trait being audited specifically to add it
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/settle.rs:31`
+
+The `CommitmentVerifier::verify` trait was updated to take `note_id: u64` (per `types.rs:95-99` comment — "AUDIT 2026-04-17 H-03: `verify` takes `note_id` so domain verifiers can enforce `note_id == deterministic_fn(data)`, closing the pre-commit race"). The shipped `RagVerifier` impl ignores the argument:
+```rust
+fn verify(&self, _note_id: u64, data: &[u8], expected_root: &Tip5Hash) -> bool {
+```
+Every `Settle<RagVerifier>` consumer is vulnerable to the pre-commit race the trait change was designed to close. The `MockVerifier` in tests also ignores `note_id`, so coverage doesn't catch this.
+
+**Fix:** Have `RagVerifier::verify` compute `expected_note_id = hash_leaf_digest(data)` (or whatever the kernel's `validate-settlement-args` uses) and `return false` if `note_id != expected_note_id`.
+
+---
+
+### H-06 — `RagVerifier::verify` and `build_settle_poke` allocate before bounding manifest size → OOM-class DoS
+
+**Repo:** vesl-core
+**Files:** `crates/vesl-core/src/settle.rs:32-38, 80`; `crates/vesl-core/src/guard.rs:118-133`
+
+`serde_json::from_slice(data)?` runs against caller-supplied bytes; the `manifest.results.len() > 10_000` / `total_bytes > 10_000_000` checks happen after deserialization. An attacker submitting 1 GB of well-formed JSON allocates the full graph before bound check fires.
+
+**Fix:** Add `if data.len() > MAX_MANIFEST_BYTES { return false; }` (or equivalent) **before** the `from_slice`.
+
+---
+
+### H-07 — `Settle::settled_ids` grows unbounded; long-running hull leaks memory
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/settle.rs:88, 164`
+
+`settled_ids: HashSet<u64>` accumulates every settled note ID forever. No eviction, no LRU, no flush. 10⁸ settles → ~3 GB of dead replay-state. (The kernel-side `settled-set` in `settle-kernel.hoon` is the authoritative replay defense; the SDK cache is a pre-flight diagnostic and can be lossy.)
+
+**Fix:** LRU-cap at 10⁶ entries.
+
+---
+
+### H-08 — Kernel pokes (`tx_builder::kernel_sig_hash`, `kernel_tx_id`) have no timeout
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/tx_builder.rs:24-44, 46-68`
+
+Both functions `await app.poke(...)` against a `NockApp` handle with no `tokio::time::timeout` wrapper. A kernel hang (panic in a graft arm, infinite loop, slow STARK proof) leaves the calling task hung indefinitely.
+
+**Fix:** Wrap pokes in `tokio::time::timeout`. The hull's `poke_kernel_with_timeout` already implements this — vesl-core just needs to match.
+
+---
+
+### H-09 — `D(amount_nicks)` / `D(fee_nicks)` / `D(key_index)` panic the wallet client on values ≥ 2^63
+
+**Repo:** vesl-core
+**File:** `crates/nockchain-client-rs/src/wallet.rs:236, 277, 282`
+
+`build_sign_hash_poke` / `build_create_tx_poke` accept `u64` parameters and pass them through `D(...)` which calls `DirectAtom::new_panic`. A transaction touching > 9.2×10^18 Nicks crashes the calling process.
+
+**Fix:** Use `nock_noun_rs::atom_from_u64` (which picks `D()` vs indirect atom by size) at every site that passes `u64` to `D()`.
+
+---
+
+### H-10 — `cue_into` blob size in `find_*_entry` is unbounded → memory DoS
+
+**Repo:** vesl-core
+**File:** `crates/nockchain-client-rs/src/note_data.rs:131, 150, 178`
+
+Every `find_*_entry` accepts the full `entry.blob: Bytes` and feeds it to `cue_into` with no application-level size check. Inside `cue` the slab grows by doubling; on attacker-crafted blobs, allocator overhead can be 4× the input size. Aggregate across concurrent peeks/pokes = DoS.
+
+**Fix:** Add `const MAX_BLOB_LEN: usize = 1 << 20` check at top of each `find_*_entry`. Add `Server::max_decoding_message_size(...)` on grpc construction.
+
+---
+
+### H-11 — gRPC clients default to plaintext `http://...`; no TLS path; no host pinning
+
+**Repo:** vesl-core
+**Files:** `crates/nockchain-client-rs/src/chain.rs:46,57`; `crates/nockchain-client-rs/src/wallet.rs:54`
+
+`ChainConfig::default()` and `WalletConfig::default()` return `http://localhost:...`. tonic with `tls-webpki-roots` is in Cargo.toml but never invoked. Any operator following the README and pointing at a remote node over `http://` exposes balance queries, tx submission, and (worse) signing requests to passive MITM.
+
+**Fix:** Reject non-loopback hosts without TLS at `connect()`. Surface a `ClientTlsConfig` option. Document the wallet endpoint as security-critical.
+
+---
+
+### H-12 — `rejam_atom` panics on attacker-controlled bytes (M-03 from prior audit, still unfixed)
+
+**Repo:** vesl-core
+**File:** `crates/nock-noun-rs/src/lib.rs:200-206`
+
+```rust
+pub fn rejam_atom(bytes: &[u8]) -> Vec<u8> {
+    let noun = cue_from_bytes(bytes)
+        .expect("rejam_atom: input is not valid jam");
+    jam_to_bytes(noun)
+}
+```
+On the cross-graft cue-then-jam canonicalization path. A graft emitting malformed bytes crashes the runtime via the next graft's `rejam_atom` call.
+
+**Fix:** Change signature to `Result<Vec<u8>, RejamError>`. Audit every call site.
+
+---
+
+### H-13 — SIWN replay-cache TTL is attacker-controlled (M-07 from prior audit, still unfixed)
+
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/caip122.rs:261-263`
+
+`(params.expiration_time - params.issued_at)` is fed to `cache.seen(&key, window)` as-is. Attacker sets `issued_at = 1970-01-01, expiration_time = 2099-01-01` → cache entry lives ~130 years. Compounded by the in-memory HashMap implementation = unbounded memory growth.
+
+**Fix:** `let window = (params.expiration_time - params.issued_at).to_std().unwrap_or(...).min(MAX_SIWN_WINDOW)` where `MAX_SIWN_WINDOW = Duration::from_secs(3600)`.
+
+---
+
+### H-14 — `schnorr_verify` does not require the pubkey to be on-curve
+
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/schnorr.rs:261-296`
+
+`schnorr_verify(pubkey: &CheetahPoint, ...)` accepts a `CheetahPoint` by reference. Any consumer that constructs `CheetahPoint { x, y, inf: false }` from raw F6 coordinates and calls `schnorr_verify` directly bypasses the `in_curve()` check that `decode_signature` performs. With an off-curve point, `ch_scal_big` still produces an affine-arithmetic result; the soundness argument (proves knowledge of discrete log w.r.t. A_GEN) collapses.
+
+The `vesl-core/crates/vesl-core/src/signing.rs::nock_point_to_vesl` shim is exactly such a consumer.
+
+**Fix:** First line of `schnorr_verify`: `if !pubkey.in_curve() { return Err(SchnorrError::BadSignature); }`. Or take `&VerifiedPublicKey` newtype.
+
+---
+
+### H-15 — Demo signing key gate (`is_demo_key`) exists but is never invoked (M-09 from prior audit, still unfixed)
+
+**Repo:** vesl-nockup (the hull lib that uses demo keys)
+**Files:** `vesl-nockup/crates/vesl-hull/src/signing.rs:31`; `vesl-nockup/crates/vesl-hull/src/config.rs:117`
+
+`is_demo_key()` is defined and exported. `grep -rn 'is_demo_key' vesl-nockup/crates/` shows two hits: the definition and the re-export. Nothing invokes it as a runtime gate. `resolve_with_demo_key_checked` passes `signing::demo_signing_key()` directly into `SettlementConfig::resolve_checked` without ever asking "is this a demo key, and are we in a mode that allows it?"
+
+A developer who copies the fakenet config to dumbnet by mistake signs every transaction with the publicly-known key `[Belt(12345), Belt(67890), ...]`.
+
+**Fix:** In `SettlementConfig::resolve_dumbnet` (vesl-core/crates/vesl-core/src/config.rs) and any dumbnet-or-better path in vesl-hull, refuse if `is_demo_key(&sk)`.
+
+---
+
+### H-16 — sync.sh sed-pattern injection via `$NOCK_PIN` allows arbitrary Cargo.toml rewrite
+
+**Repo:** vesl-nockup
+**File:** `sync.sh:320-322`
+
+```bash
+sed -i -E \
+    's|path = "\.\./\.\./\.\./nockchain/crates/[^"]*"|git = "https://github.com/nockchain/nockchain.git", rev = "'"$NOCK_PIN"'"|g' \
+    "$toml"
+```
+`$NOCK_PIN` is interpolated verbatim into a sed replacement pattern with zero validation. An override `NOCK_PIN='abc", branch = "main'` produces `rev = "abc", branch = "main"` — Cargo will resolve the mutable branch instead of the immutable SHA. `&` is sed's "entire matched text" sigil; `NOCK_PIN='deadbeef&'` interpolates the full match back into the output, corrupting Cargo.toml.
+
+**Fix:** Validate `$NOCK_PIN` matches `^[0-9a-f]{40}$` at the top of sync.sh before any rewrite. Same for `$VESL_CORE_PIN`, `$VESL_WALLET_PIN`. Migrate from `sed` to `toml_edit` for structured-format rewrites.
+
+---
+
+### H-17 — `cp -rL` in sync.sh ingests upstream maintainer's untracked working-tree state
+
+**Repo:** vesl-nockup
+**File:** `sync.sh:208,216,226,264,277,309`
+
+`cp -rL` ignores `.gitignore`. vesl-core's working tree has untracked artifacts: `.data.vesl-checkpoint-test/{event-log.sqlite3, pma/0.pma, ...}`, `templates/*/app.nock`, `templates/*/out.jam`. Verified present. Running sync.sh today drags all of them into the vesl-nockup bundle. Downstream users receive surprise binary content (potentially including stale-test database state).
+
+**Fix:** Replace `cp -rL` with `rsync -aL --exclude-from=<(git -C "$vesl" ls-files --others --ignored --exclude-standard --directory)` so gitignored files are skipped. Strengthen the existing dirty-tree warning to a hard refusal.
+
+---
+
+### H-18 — sync.sh follows arbitrary symlinks; nockchain working-tree silently joins the trust boundary
+
+**Repo:** vesl-nockup
+**File:** `sync.sh:208-216, 262-266`
+
+`cp -rL` follows symlinks. `vesl-core/hoon/common`, `hoon/dat`, `hoon/jams`, `hoon/trivial.hoon` are symlinks into `../nockchain/hoon/*`. So "trust vesl-core" is actually "trust the union of vesl-core AND nockchain working trees as of the sync moment."
+
+**Fix:** Before each `cp -rL`, assert every symlink target is within an expected tree.
+
+---
+
+### H-19 — Templates' `build.rs` invokes `nockup-graft` from PATH (RCE surface)
+
+**Repo:** vesl-nockup
+**Files:** `templates/{counter,data-registry,graft-hash-gate,graft-intent,graft-mint,graft-settle,settle-report}/build.rs`
+
+Standard `build.rs` PATH risk. A malicious `nockup-graft` shim earlier on PATH triggers arbitrary code execution on every `cargo build`.
+
+**Fix:** Either verify the `nockup-graft` binary by sha256 before invoking, or wire the codegen pass into the graft-inject library directly so `build.rs` doesn't shell out.
+
+---
+
+### H-20 — Snapshot SHA-256 recorded but never verified on resume
+
+**Repo:** vesl-core
+**File:** `crates/vesl-checkpoint/src/lib.rs:50-61, 188-232`
+
+`Snapshot::source_sha256` is captured at snapshot time and persisted. `resume()` reads `meta.toml` (via `Snapshot::load`) but does NOT re-hash the new kernel's source and compare. The rustdoc claims "mismatches are warnings, not errors" — but there is no comparison code anywhere.
+
+**Fix:** Add an optional `&Path` parameter to `resume_with_data_dir` for the new kernel's source hoon; if provided, hash it and warn (or error) on mismatch with `snapshot.source_sha256`.
+
+---
+
+### H-21 — Dockerfile clones nockchain from `zorp-corp/nockchain` (likely outdated/wrong org) at outdated SHA
+
+**Repo:** vesl-core
+**File:** `Dockerfile:64-66`
+
+The Dockerfile uses `git clone https://github.com/zorp-corp/nockchain.git` at SHA `505c3ea`. All other references (workflows, sync.sh, docker README) use `nockchain/nockchain` at SHA `fe46f4e`. Whoever uses `docker build` gets a different (and outdated) nockchain than CI ships. Either `zorp-corp` is wrong, or `nockchain/nockchain` is wrong — they cannot both be canonical.
+
+**Fix:** Pick one canonical org, update consistently across Dockerfile, workflows, sync.sh, docs. Bump NOCKCHAIN_COMMIT in Dockerfile to match CI's NOCK_PIN.
+
+---
+
+### H-22 — `vesl-core` `ci.yml` is documented-broken (workflow runs but cargo cannot resolve deps without sibling nockchain checkout)
+
+**Repo:** vesl-core
+**File:** `.github/workflows/ci.yml`
+
+The workflow's own comment: "Full CI requires either (a) a checkout step that clones nockchain to the expected relative path, or (b) publishing nockchain crates to a registry. Until then, this workflow is useful for local `act` runs and as a template." `cargo test`, `cargo audit`, `cargo clippy` all need a sibling `../nockchain/` checkout that the workflow never creates. So none of these gates actually run.
+
+**Fix:** Mirror the `jam-determinism.yml` pattern (which DOES check out nockchain at NOCK_PIN). Add an explicit `actions/checkout@v4` step for nockchain at `NOCK_PIN`.
+
+---
+
+## 4. Medium Severity
+
+### M-01 — Empty `results` list bypasses `verify-manifest` in Hoon kernel
+
+**Repo:** vesl-core
+**File:** `protocol/lib/rag-logic.hoon:66-86`
+
+`verify-manifest` returns `%.y` for `(results=~, prompt==query)` — no Merkle verification runs. The Rust hull catches this (`guard.rs:142-144`), but direct kernel pokes don't go through the Rust hull. Combined with H-02 (unsigned register), an attacker with kernel poke access can mint "settled" notes for arbitrary (id, hull) with zero data binding.
+
+**Fix:** `?>  !=(~ results.mani)` at the top of `verify-manifest`.
+
+### M-02 — Hoon `verify-manifest` doesn't enforce dup-id or null-byte chunk rules that Rust enforces
+
+**Repo:** vesl-core
+**File:** `protocol/lib/rag-logic.hoon:66-86` vs `crates/vesl-core/src/guard.rs:142-163`
+
+Rust rejects duplicate chunk IDs and chunks containing null bytes. Hoon doesn't. Strictly weaker on the direct-kernel-poke path.
+
+### M-03 — `verify-chunk` crashes (not %.n) on out-of-range sibling atoms
+
+**Repo:** vesl-core
+**File:** `protocol/lib/vesl-merkle.hoon:96-130`
+
+Sibling atom ≥ p^5 → `hash-ten-cell:tip5` asserts → kernel poke crash, not `%.n` return.
+
+**Fix:** `?:  (gth hash.i.proof max-tip5-atom)  %.n` at top of each loop iteration.
+
+### M-04 — `read-index` field in submitted proof is unvalidated
+
+**Repo:** vesl-core
+**File:** `protocol/lib/vesl-stark-verifier.hoon:79-86`
+
+Verifier asserts `?>  =(~ hashes.proof)` but not `?>  =(0 read-index.proof)`. Not a direct soundness break today; future callers could be confused.
+
+**Fix:** One-line assert `?>  =(0 read-index.proof)` after the hashes check.
+
+### M-05 — Caller-supplied `[s, f]` with non-Belt atoms crash `build-tree-data`
+
+**Repo:** vesl-core
+**File:** `protocol/lib/vesl-stark-verifier.hoon:179-184`
+
+`pelt-lift` asserts `based`. Caller with non-Belt subject crashes inside `build-tree-data`. Verify-side mule catches it; prover side doesn't. Diagnostic collapse.
+
+**Fix:** `?>  (based-noun s)` and `?>  (based-noun f)` at top of `verify-inner` and `prove-computation`.
+
+### M-06 — `split-and-fold` Horner fold is non-injective across manifest segments
+
+**Repo:** vesl-core
+**File:** `protocol/lib/vesl-stark.hoon:26-52`
+
+Folds `qb ++ ob ++ pb ++ chunk-belts` without separators. Two manifests with different `query`/`output` split-points but same concatenation produce the same fold output. The data-binding from "STARK verified" to "manifest verified" is non-injective. (Mitigated today by `settle-note`'s separate Merkle verification — but the README must not claim the STARK binds manifest content.)
+
+**Fix:** Prepend length prefixes to the fold-belts list before Horner.
+
+### M-07 — `prove-computation` doesn't lower formula before `fink:fock`
+
+**Repo:** vesl-core
+**File:** `protocol/lib/vesl-prover.hoon:51-92`
+
+`fink:fock` crashes on opcodes 9/10/11. Production caller passes only safe opcodes 0/4, but the public arm signature suggests arbitrary formulas are supported.
+
+**Fix:** Call `(lower formula)` inside `prove-computation` (`vesl-lower` already exists). Or hard-assert via `?>  (only-0-8 formula)`.
+
+### M-08 — Hoon `validate-settlement-args` in `%verify` mode bypasses the replay check
+
+**Repo:** vesl-core
+**File:** `protocol/lib/kernel-arms.hoon:74-79`
+
+`%verify` mode skips replay; verify returns `%.y` for already-settled notes. UX trap for callers using `%verify` as a "can I settle this?" preflight.
+
+**Fix:** Add an opt-in `%can-settle` query that includes replay, or document the limitation prominently.
+
+### M-09 — `hash-leaf` trailing-zero collisions (H-03 from prior audit, unfixed)
+
+**Repo:** vesl-core
+**Files:** `protocol/lib/vesl-merkle.hoon:38-52`; `crates/nockchain-tip5-rs/src/lib.rs:131-161`
+
+Both Rust and Hoon strip trailing zero bytes when chunking into belts. Documented; planning doc landed (`docs/AUDIT_H03_HASH_LEAF.md`); fix not in `dev`. Still: `hash_leaf("x") == hash_leaf("x\0")`.
+
+**Fix:** Land `hash-leaf-v2-domain(tag, data)` per the planning doc.
+
+### M-10 — `bytes_to_belts` (vesl-signing) trailing-NUL collisions
+
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/domain.rs:129-143`
+
+`bytes_to_belts(b"") == bytes_to_belts(b"\0")`. Different bytes hash to the same `tip5_with_domain` digest if their tails differ only in trailing NULs aligned to a 7-byte boundary. Public `tip5_with_domain` consumers hashing arbitrary byte tails can construct collisions.
+
+**Fix:** Length-prefix in `bytes_to_belts` (emit `Belt(bytes.len() as u64)` first).
+
+### M-11 — Non-constant-time scalar multiplication leaks the Schnorr nonce
+
+**Repo:** vesl-wallet
+**Files:** `crates/vesl-signing/src/math/cheetah.rs:333-346` (`ch_scal_big`), `:304-318` (`ch_add`), `:272-280` (`ch_double`)
+
+Textbook double-and-add: iteration count = scalar bit-length; `ch_add` has multiple data-dependent branches. Timing side-channel on `schnorr_sign` recovers bits of the nonce `k`; from `(k, chal, sig)` the verifier formula yields `sk` directly. Threat model: multi-tenant facilitator, co-located serverless, any remote observer.
+
+**Fix:** Replace `ch_scal_big` with a Montgomery-ladder constant-time impl. Or nonce-blind via `k' = k + r·G_ORDER`.
+
+### M-12 — `SchnorrPrivateKey` derives `Debug`; raw scalar leaks via `{:?}`
+
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/schnorr.rs:93-95`
+
+`#[derive(Debug)] pub struct SchnorrPrivateKey(UBig)`. `UBig`'s Debug prints the integer in decimal. Any `tracing::debug!("sk={:?}", sk)` dumps the key to logs.
+
+**Fix:** Manual `Debug` impl printing `<redacted>`. Same for `ExtKey`, `DerivedKey`.
+
+### M-13 — Secrets never zeroized despite `zeroize` dependency
+
+**Repo:** vesl-wallet
+**Files:** `crates/vesl-wallet/Cargo.toml:27-28`; `crates/vesl-signing/src/schnorr.rs:94`; `crates/vesl-wallet/src/hd.rs:68-78`; `crates/vesl-wallet/src/wallet.rs:21-27`
+
+`zeroize` is declared with comment `# Zeroize key material on drop.`. `grep -rn 'Zeroize\|ZeroizeOnDrop\|impl Drop'` returns nothing. Secrets (private keys, chain codes, master seed, mnemonic) outlive their `Drop` in freed heap/stack memory.
+
+**Fix:** Add `#[derive(ZeroizeOnDrop)]` (with custom `Zeroize` for `UBig`-containing types). Enable `bip39/zeroize` feature. Zeroize the 64-byte seed local in `from_seed_phrase`.
+
+### M-14 — Replay cache is in-memory only; restart = empty cache (M-05 from prior audit)
+
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/replay_cache.rs:55-86`
+
+ADR-0010 deferred. For a load-balanced fleet, an attacker presents the same bundle to N instances rapidly. No persistent backend exists.
+
+**Fix:** Either ship a Redis backend behind a feature flag, or document loudly that this implementation requires sticky sessions.
+
+### M-15 — `parse_caip122_message` accepts CRLF, doesn't assert blank-line empty, doesn't reject trailing junk
+
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/caip122.rs:124, 136-138, 144`
+
+Parser laxity compounds with C-05 (field injection). `_blank` is read but content unchecked; `lines.next().is_none()` is never asserted after `Expiration Time`; `str::lines()` silently strips `\r`.
+
+**Fix:** Assert blank line is empty, assert iterator exhausted, reject any `\r` in body.
+
+### M-16 — `verify` panics on poisoned replay-cache mutex
+
+**Repo:** vesl-wallet
+**File:** `crates/vesl-signing/src/replay_cache.rs:68, 77`
+
+`lock().expect("replay cache poisoned")`. One panic → service permanently dead.
+
+**Fix:** `lock().unwrap_or_else(|p| p.into_inner())` or `parking_lot::Mutex`.
+
+### M-17 — `make_tas(slab, hash_b58)` constructs Hoon `@tas` from base58 strings (contains uppercase)
+
+**Repo:** vesl-core
+**File:** `crates/nockchain-client-rs/src/wallet.rs:235, 271, 272, 278, 289`
+
+Hoon `@tas` requires lowercase + digits + hyphen. Base58 contains uppercase. The noun is a valid atom but the kernel-side `@tas` ascription is wrong.
+
+**Fix:** Use `make_atom_in(slab, b58.as_bytes())`.
+
+### M-18 — `mont_reduction` precondition not enforced at the Rust API (sub-finding of C-04)
+
+**Repo:** vesl-core
+**File:** `crates/nockchain-tip5-rs/src/lib.rs` (consumed via nockchain-math)
+
+`mont_reduction` debug-asserts `a < RP`. With limbs at `u64::MAX`, the inputs are out of documented range. Tied to C-04; closes when C-04 closes.
+
+### M-19 — `verify_proof`'s `ct_eq` is misleading
+
+**Repo:** vesl-core
+**File:** `crates/nockchain-tip5-rs/src/lib.rs:213-216`
+
+The byte-level `ct_eq` is correct but the recomputation loop has data-dependent branches everywhere. Function is not constant-time in any meaningful sense.
+
+**Fix:** Drop the `ct_eq` and the surrounding "constant-time" comment, or document precisely which path is constant-time.
+
+### M-20 — `peek_atom_u64` collapses absent-path with zero-value
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/peek.rs:150-165`
+
+Returns `Some(0)` for both "path didn't bind" and "path bound to zero." Critical when the absence has security meaning (e.g., RBAC permission check).
+
+**Fix:** Add a `peek_atom_u64_strict` variant returning `Result<Option<u64>, PeekError>`.
+
+### M-21 — `build_settle_note_manifest_poke` silently coerces non-UTF8 field names to empty string
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/graft_pokes/settle.rs:242`
+
+`std::str::from_utf8(name).unwrap_or("")`. A field name that's not valid UTF-8 silently becomes `""`. Manifest binds wrong name; verification fails opaquely.
+
+**Fix:** Change signature to `fields: &[(&str, &[u8])]`. Or expose `_raw` variant for binary names.
+
+### M-22 — u64 → usize truncation in `build_seeds` on 32-bit targets
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/settle.rs:238`
+
+`Nicks(output_amount as usize)`. WASM (32-bit) targets silently truncate. Vesl-core officially supports 64-bit, but `Cargo.toml` declares no constraint.
+
+**Fix:** `usize::try_from(output_amount).map_err(...)?` or `compile_error!` for 32-bit targets.
+
+### M-23 — `templates/vesl/Cargo.toml` pins inconsistent older nockchain SHA
+
+**Repo:** vesl-nockup
+**File:** `templates/vesl/Cargo.toml:13-15`
+
+Other templates use `NOCK_PIN=fe46f4e3...`. vesl template uses `1a23ccdab...` (11 days older). End-users scaffolding from vesl template get older nockchain than the rest of the catalog.
+
+**Fix:** Either sync vesl template's pin to NOCK_PIN, or refactor sync.sh to rewrite this template's git-deps too.
+
+### M-24 — Manifest body strings spliced verbatim into compiled Hoon; `--lib-dir` warn-only
+
+**Repo:** vesl-nockup
+**Files:** `tools/graft-inject/src/inject.rs:288-294, 337-341`; `tools/graft-inject/src/util.rs:108-121`
+
+`graft-inject --lib-dir /tmp/evil_graft_pack` splices arbitrary attacker-controlled Hoon into the user's kernel. Warning is opt-out, not refusal.
+
+**Fix:** Refuse without `--accept-untrusted-libs`. Print per-manifest sha256 before splicing.
+
+### M-25 — `tools/test-registry/run-init.sh:56` reuses the sed-injection antipattern
+
+**Repo:** vesl-nockup
+**File:** `tools/test-registry/run-init.sh:56`
+
+`sed "s|__VESL_NOCKUP_PATH__|${VESL_NOCKUP}|g"`. Same hazard as H-16, scoped to test infrastructure. Compounds if the pattern spreads.
+
+**Fix:** Use a delimiter that's quoted-out-of `${VESL_NOCKUP}`, or migrate to here-doc templating.
+
+### M-26 — `vesl-checkpoint` schema-extension resume resets per-graft state to type defaults
+
+**Repo:** vesl-core
+**File:** `crates/vesl-checkpoint/src/lib.rs:173-187`
+
+Documented behavior: v0.2 resets per-graft state on schema-extension resume. Operators needing data preservation re-poke after resume. Worth restating because it means snapshot/resume across kernel rewrites silently drops state — surprising for users.
+
+**Fix:** Add a migration helper or at minimum a `--strict-state-shape` flag that errors instead of resetting.
+
+### M-27 — Templates' `Cargo.lock` excluded from sync.sh `--verify` diff
+
+**Repo:** vesl-nockup
+**File:** `sync.sh:447`
+
+`diff -ruN --exclude=target --exclude=Cargo.lock`. Templates' Cargo.lock files ARE committed (`templates/counter/Cargo.lock`, etc.). Drift in transitive dep versions is invisible to verify.
+
+**Fix:** Either commit Cargo.lock canonically and include in verify, or gitignore Cargo.lock from templates.
+
+### M-28 — `templates/*/app.nock` and `out.jam` artifacts ship via sync.sh
+
+**Repo:** vesl-nockup (via vesl-core)
+**Files:** `vesl-core/templates/{counter,data-registry,graft-intent,settle-report}/app.nock`, `out.jam`
+
+Stale compiled-kernel binaries from maintainer's local builds. `cp -rL` ingests them. End-user scaffolding may pick up stale `out.jam` over freshly-built.
+
+**Fix:** Add `rm -f "$here/templates/$t/app.nock" "$here/templates/$t/out.jam"` to sync.sh.
+
+### M-29 — `vesl-checkpoint/.data.vesl-checkpoint-test/` SQLite + PMA files leak via sync
+
+**Repo:** vesl-nockup (via vesl-core)
+**Files:** `vesl-core/crates/vesl-checkpoint/.data.vesl-checkpoint-test/*`
+
+Same root cause as M-28. `cp -rL` slurps maintainer runtime test data, including arbitrary SQLite content.
+
+**Fix:** `--exclude='.data.*'` in sync.sh's copy step.
+
+### M-30 — Repeated `unsafe { *slab.root() }` not encapsulated
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/peek.rs:151, 242, 274, 307, 348, 361, 377, 389`
+
+Eight call sites duplicate the same `unsafe` dereference with the same SAFETY argument. A future refactor of `root()` semantics requires re-auditing every site.
+
+**Fix:** Single `pub(crate) fn slab_root_noun(slab: &NounSlab) -> Noun` helper.
+
+### M-31 — `accept_timeout_secs: 0` in `SettlementConfig::local` is structurally fine but foot-shape
+
+**Repo:** vesl-core
+**File:** `crates/vesl-core/src/config.rs:228, 294`
+
+Local mode sets timeout to 0. A misrouted `submit_and_wait` returns immediately. Today protected by `can_submit()` gate; brittle.
+
+**Fix:** Use `u64::MAX` as sentinel or panic in `chain_config()` for local mode.
 
 ---
 
 ## 5. Low / Informational
 
-### L-01 — Build-time JAM path is environment-trusted
-`kernels/{guard,mint,settle}/build.rs` reads `KERNEL_JAM_PATH` from env and computes its sha256 at build time. The runtime `verify_kernel()` checks the embedded JAM matches that sha256. If `KERNEL_JAM_PATH` points at a tampered file at build time, the build hashes the tampered file and the runtime check passes. This trusts the build environment, not a fixed path. Documented behavior; flag for ops.
+### L-01 — `tx_builder.rs:34` `D(fee.0 as u64)` panics if fee exceeds `DIRECT_MAX`
 
-### L-02 — `pubkey_canonical_bytes` panics on point-at-infinity
-`crates/vesl-core/src/signing.rs:172`. Documented invariant. Surface as `Result` for callers that decode pubkeys from untrusted input.
+vesl-core. Practically near-zero risk (fee comes from config, default 256), but the panic is reachable. Use `atom_from_u64`.
 
-### L-03 — `derive_pubkey` `.expect()` if sk scalar ≥ G_ORDER
-`crates/vesl-core/src/signing.rs:122-124`. Documented invariant.
+### L-02 — `signing.rs:124, 144` use `.expect(...)` in `derive_pubkey` and `pubkey_hash`
 
-### L-04 — `--no-auth` loopback parse is brittle
-`hull/src/api.rs:242-247`. Recognizes `127.0.0.1`, `::1`, `localhost`, and anything that parses as `IpAddr::is_loopback()`. Misses unusual binds like `127.1` (interpreted as loopback by some Linux resolvers but not parsed by `IpAddr`). Low impact.
+vesl-core. Documented invariants; callers must range-check inputs. Could be `Result`-returning.
 
-### L-05 — `sed -i` in sync.sh rewrites every match in build.rs
-`vesl-nockup/sync.sh:306-308`. `sed -i 's/graft-inject/nockup-graft/g'` replaces any occurrence in build.rs. A future build.rs that legitimately refers to "graft-inject" outside the binary-name context (doc comment, error string) gets silently rewritten. Minor.
+### L-03 — `verify_tx.rs:140, 150` use `unreachable!()` on enum branches assumed eliminated upstream
 
-### L-06 — `cp -rL` in sync.sh dereferences symlinks
-`vesl-nockup/sync.sh:191-210`. Documented warning at line 102-107: "A compromised upstream vesl checkout could plant a symlink to secrets (e.g. ~/.ssh/id_rsa) that ends up committed here." The `--verify` mode catches drift but not malicious symlinks. Ops responsibility.
+vesl-core. Fragile if upstream code refactors.
 
-### L-07 — NOCK_PIN is the only protection for shipped templates' nockchain rev
-`vesl-nockup/sync.sh:37`. SHA collision is impractical; force-push or rev-substitution at the source repo is not. Trust contract: GitHub honors immutable refs.
+### L-04 — `peek.rs:99-100` `unwrap_triple_unit_atom` collapses absent/zero in byte-vec path
 
-### L-08 — Hull `hull_id` is hardcoded to 1
-`hull/src/api.rs:158`. Single-hull-per-process by design. Multi-tenant deployments require multiple hull processes. Flag for ops.
+vesl-core. Same trap as M-20 for the byte path.
 
-### L-09 — `handle-register` slogs but emits no error effect on duplicate
-`protocol/lib/kernel-arms.hoon:17-23`. The caller cannot distinguish "registered fresh" from "rejected duplicate" by effect inspection — only by counting `(lent effects)`. Emit an explicit `[%register-rejected hull old-root]` effect on duplicate so Rust callers can distinguish.
+### L-05 — `Settle::poke_bytes` no upper bound on payload size
 
-### L-10 — settle-kernel `%verify` mode skips the replay check
-`protocol/lib/kernel-arms.hoon:74-75`. Documented. A `%verify` poke against a duplicated note ID returns the verification result, not "already settled". Read-only by design; callers using `%verify` for status checks should consult `[%settled note-id ~]` peek separately.
+vesl-core. Memory amplification when paired with H-06.
 
-### L-11 — STARK verifier `mule`-wrap collapses constraint errors to %.n
-**Disposition:** **DEFERRED** — see §7. Diagnostics-quality work that gets revisited alongside `~&` trace decisions when `verify-settlement-full` lands.
-`protocol/lib/vesl-stark-verifier.hoon:77`. Good for DoS (no crash on adversarial proof), bad for diagnosability. A genuine soundness fault returns `false` with no trace. Operationally hard to debug; not exploitable.
+### L-06 — No zeroization for `Mint::tree` / `Guard::roots`
 
-### L-12 — STARK verifier `verifier-eny` controls Merkle-proof check ordering
-**Disposition:** **DEFERRED** — see §7. STARK-internal design-intent question; soundness is not affected (proof verification is order-independent), only the DDOS-resistance guard. Better resolved with upstream context.
-`protocol/lib/vesl-stark-verifier.hoon:956-978`. `verify-merk-proofs` uses `verifier-eny` to randomize order — a guard against adversarial worst-case ordering. If the caller supplies a fixed `verifier-eny`, the order is deterministic and attackers can craft proof sets with predictable verification order. The actual proof verification is order-independent, so this only weakens the DDOS-resistance design intent. Caller should pass fresh entropy per verification.
+vesl-core. Defense-in-depth; not a primary vector. Add `ZeroizeOnDrop`.
 
-### L-13 — `build-prompt` 10MB cap is independent of HTTP body limit
-`hull/src/api.rs:270` caps body at 4MB. `protocol/lib/rag-logic.hoon:30` caps reconstructed prompt at 10MB. The 2.5× headroom is intentional (a tightly-packed manifest could amplify the body→prompt ratio). Defense in depth; flag the relationship in docs so a future hull-fork raising the HTTP limit doesn't outpace the kernel cap.
+### L-07 — `CommitmentVerifier` lacks domain tag
 
-### L-14 — Hull `/verify` silently ignores caller's `merkle_root` for historical verification
-`hull/src/api.rs:459-486`. The handler accepts a `merkle_root` parameter but returns `valid: true` only when `target_root_hex == current_root_hex`. The API surface implies historical verification but the hull holds no history. Misleading; document or remove.
+vesl-core. A caller wiring `RagVerifier` against a non-RAG flow gets silent "verified" answer.
 
-### L-15 — Note counter file written atomically but not racy-safe across processes
-`hull/src/api.rs:69-88`. Single-writer invariant by design. Two hull processes sharing `output_dir` race on the counter file.
+### L-08 — `vesl-stark-verifier.hoon:510` `&(=(test-mode %.n) !(verify-merk-proofs ...))` is logic-readable but fragile
 
-### L-16 — `tip5_to_atom_le_bytes` does manual bigint arithmetic
-`crates/nockchain-tip5-rs/src/lib.rs:77-121`. Horner-method base-PRIME encoding via u128 with carry propagation. Looks correct but is the kind of code that benefits from differential fuzzing against a reference impl (e.g., `num-bigint` or `ibig`). Add a fuzz harness.
+vesl-core. Single-character refactor away from disaster. After C-02 lands, simplify.
 
-### L-17 — Demo signing key documented but no warning when used outside fakenet
-`hull/src/signing.rs:13-32`. See M-09. Listed twice because the doc-level issue (developers reading the source) is separable from the runtime-refusal issue (config resolver accepting the key).
+### L-09 — `guard-graft.hoon:117-123` peek returns `(unit (unit (unit @)))` — three-level unwrap
 
----
+vesl-core. API shape footgun.
 
-## 6. STARK Boundary Notes
+### L-10 — `kv-graft.hoon` `%kv-delete` is idempotent; `registry-graft` `%registry-del` errors on missing
 
-The STARK verifier (`protocol/lib/vesl-stark-verifier.hoon`) and its `verify-settlement` wrapper are the bridge between off-chain prover output and on-chain attestation. The audit examined:
+vesl-core. Composer trap — different semantics between graft families.
 
-- **Version pinning** (line 25, 51): `?>  ?=(%2 version.proof)` correctly refuses v0/v1 proofs. The comment notes `version.proof` is unabsorbed by the Fiat-Shamir transcript, so the verifier rejects at the boundary instead of relying on transcript binding. This is the right choice.
-- **Commitment / nonce binding** (line 562-564): `verify-settlement` ties `commitment.vr == atom-to-digest(expected-root)` AND `nonce.vr == atom-to-digest(expected-hull)`. These are equality checks against fixed-width digests, which sidesteps the trailing-zero collision from H-03 (digests are 5×8 bytes, no semantic length variation). Sound.
-- **Test-mode** (H-01): the one structural concern.
-- **`verify-merk-proofs` randomization** (L-12): the entropy source matters for DDOS-resistance only, not for soundness.
-- **Constraint-completeness TODO** (H-02): unresolved by this audit; needs a STARK-fluent second reviewer.
+### L-11 — `forge-graft.hoon` is stateless and does NOT check registered roots
 
-The Fiat-Shamir transcript is constructed via `verifier-fiat-shamir` after each round (lines 138, 148, 190, 261, 300, 344, 380). The challenges depend on the proof contents in order, which is the standard non-interactive transformation. No issues found in the absorb sequence.
+vesl-core. Documented; composer must pair with stateful graft. Worth a runtime guard.
 
-`verify-merk-proofs` (line 956) uses `(verify-merk-proof:merkle m.i.sorted)` per proof. The Merkle proof primitive is `hash-ten-cell:tip5` based, which matches `hash-pair`. Domain separation between leaf and internal hashes (via `hash-belts-list` vs `hash-ten-cell`) is preserved.
+### L-12 — `validate-graft.hoon` `%non-empty` rule treats `body=~` as empty but accepts `[~ ~]`
 
-**One concrete soundness invariant that should be tested but currently isn't (to my knowledge):** count the challenges absorbed at each Fiat-Shamir step and assert it equals the constraint count. This is the regression test the C-lead-2 TODO mentions. Adding it is the single highest-leverage soundness investment in this codebase.
+vesl-core. Rule semantics loose. Future "length" / "in-set" rules will amplify.
 
-### What the current STARK proof actually commits to
+### L-13 — `vesl-gates.hoon:138-156` catalog "shorthand" comment hints at unimplemented `proof=@` path
 
-The shipped `prove-computation` proves execution of a hardcoded 64-nested-increment Nock formula (`vesl-stark.hoon:++build-fs-formula`) against a Horner-folded belt-digest of the manifest content, packed into the proof's commitment/nonce header. The link from "STARK verified" to "verify-manifest returned %.y" is through that belt-digest — a content commitment, not an execution proof of the actual gate.
+vesl-core. Docs drift; not exploitable.
 
-This is not a design choice; it is a workaround. The cell-subject memory-table gap documented in `~/projects/nockchain/stark-proof-stash/docs/stark-proof-branch-late-breaking/FLAG_STARK_MEMORY_TABLE.md` blocks proving the actual Hoon gate, because Hoon's `=/` compiles to Nock 8 (modified subjects) and the STARK memory table only tracks slot operations against the original subject. Two local fixes were attempted (content-keyed memory dedup, multi-subject rna-bfta with new column layout) — both failed in instructive ways; the team is waiting on upstream guidance from the Nockchain core team.
+### L-14 — `vesl-mint.hoon` is a no-op re-export shell
 
-The integrity argument for the current pipeline still holds: an attacker cannot swap manifest content without invalidating the belt-digest header, and the verifier rejects on header mismatch. But anyone reading "STARK verifies" as "the gate provably executed correctly" would be over-trusting — what the proof actually attests is "some 64-increment Nock program executed against the digest-committed content," not "verify-manifest evaluated to true." The end-to-end gate proof is staged in the `stark-proof-stash` repo as additive arms (`verify-settlement-full`, `rag-logic-standalone`, `belts-to-btree`, `lower-deep`) ready to re-apply when upstream lands the memory-table fix. `.dev/CRITICAL_LEADS.md`'s C-lead-1 dissolves at that point: the formula stops being hardcoded and the proof commits to actual gate execution rather than to a placeholder Nock program.
+vesl-core. Cosmetic / documentation. The `/+  *vesl-merkle` chain transitively exposes arms but the file reads as a placeholder.
 
----
+### L-15 — `verify-chunk` allows depth-0 proofs against any chunk if root = hash-leaf(chunk)
 
-## 7. Items Deferred Pending STARK Pipeline Progress
+vesl-core. Mathematically correct for single-leaf trees. Combined with H-02 (arbitrary roots) widens pollution surface.
 
-The advanced STARK prover/verifier work lives outside vesl-core in `~/projects/nockchain/stark-proof-stash`, paused waiting for upstream coordination on the cell-subject memory-table multi-subject gap. Several audit findings touch code that will be substantially revisited when that work resumes; fixing them now risks rework or pre-empts the upstream review forum.
+### L-16 — `verifier-eny` has no derivation guidance; tests pass `0`
 
-### Defer until upstream lands
+vesl-core. With `eny=0`, Merkle-proof ordering is deterministic; the DDOS-resistance guard is lost.
 
-- **H-02 (verifier completeness / perf TODO, C-lead-2).** Self-documented as requiring STARK-fluent reviewer signoff. The Nockchain core team is the qualified review forum; this is the canonical upstream-coordination item. The constraint-count invariant test mentioned in `.dev/CRITICAL_LEADS.md` is borderline-agent-safe but only meaningful after upstream design intent is confirmed. Don't write the invariant blind — it could codify the wrong shape.
-- **L-11 (mule-wrap collapses constraint errors to %.n).** Diagnostics-quality issue. Safe to defer because the verifier-side trace work will be revisited when `verify-settlement-full` lands and `~&` diagnostics get re-evaluated against the new shape.
-- **L-12 (verifier-eny randomization).** STARK-internal design-intent question better resolved with upstream context than locally. The current behavior is sound (proof verification is order-independent); only the DDOS-resistance guard is weakened by a fixed eny.
-- **C-lead-1 (formula hardcoding).** Already documented in source and in `.dev/CRITICAL_LEADS.md`. Dissolves when cell-subject proving ships. No additional audit action needed beyond what's already in-tree.
+### L-17 — `build-fs-formula` is hardcoded with no version tag
 
-### Fix now despite the STARK pipeline being in flux
+vesl-core. Already C-lead-1; flagged for FS-transcript inclusion when the formula stops being hardcoded.
 
-- **H-01 (test-mode parameter).** One-line fix: `?>  =(test-mode %.n)` at the top of `verify` and `verify-settlement`, or remove the parameter from the door entirely. Durable across the stash re-application — the README's re-apply plan keeps the existing `verify` and `verify-settlement` arms intact and only **adds** `verify-settlement-full`. Removing test-mode now means the fix carries through the upstream rewrite without re-work.
-- **H-03 (trailing-zero hash collision).** Length-prefix and domain-separate leaf data at the SDK layer **now**. When cell-subject proving ships, more leaves flow through `hash_leaf` — the new `belts-to-btree` path hashes balanced-tree leaves, and `verify-settlement-full` binds to additional manifest content. Length-prefixing now prevents rework once the new code paths land.
-- **H-04 (Schnorr deterministic-nonce contract).** Audit signing call sites now; when proof binding gets tighter post-upstream-fix, settlement signatures will be more entangled with manifest content and the freshness contract gets more load-bearing. Annotating call sites with their freshness source is cheap insurance.
+### L-18 — `kernel-arms.hoon:31-39` `parse-payload` collapses cue + sieve failures
 
-### What to do when upstream lands the memory-table fix
+vesl-core. Diagnostic gap.
 
-Per `~/projects/nockchain/stark-proof-stash/README.md` "If you ever re-apply this":
+### L-19 — `wait_for_acceptance` prints errors to stderr, doesn't propagate
 
-1. Land additive arms first — additive only. New: `belts-to-btree`, `btree-to-belts`, `btree-depth` on `vesl-merkle.hoon`; `lower-deep` on `vesl-lower.hoon` (line-60 cast fix already on local-dev); `verify-settlement-full` on `vesl-stark-verifier.hoon`; `provable-result` and `provable-manifest` on `sur/vesl.hoon`; new libraries `rag-logic-provable.hoon` and `rag-logic-standalone.hoon`.
-2. Add `hoon/lib/` symlinks for the two new libraries (per CLAUDE.md §3 — missing symlinks cause silent hoonc exit 2).
-3. Land the `vesl-kernel.hoon` rewrite last with a fresh `vesl.jam` rebuild and `assets/CHECKSUMS.sha256` update via `scripts/check-jam.sh`.
-4. **Add the H-02 constraint-count invariant test against the new verifier shape** — this is the right moment, not before.
-5. **Re-audit the prove/verify path** for H-01 disposition under the new arm, `verify-settlement-full`'s binding to expected-root/expected-hull, and the absorbed-challenge invariant.
+vesl-core. UX trap; convert to `tracing::warn!`.
 
-Skip the `~&` diagnostics and the line-603 type-annotation edit from the stash when re-applying — both were debugging cruft, not load-bearing.
+### L-20 — `WalletClient::pid_counter: i32` wraps after 2^31 - 1 calls
 
----
+vesl-core. Long-running daemon collision. Use `u64`.
 
-## 8. Supply Chain (vesl-nockup)
+### L-21 — `MerkleTree::build` panics on empty leaves; `proof()` panics OOB
 
-`vesl-nockup` distributes Hoon libraries, the vesl-core crate stack, the vesl-wallet workspace, and starter templates. The audit examined:
+vesl-core. Documented preconditions.
 
-**Pin discipline** (sync.sh:37-44). `NOCK_PIN` and `VESL_CORE_PIN` are hardcoded constants in sync.sh. CI can override via env. The hard-pin check (line 65-75) refuses to run when the sibling vesl-core HEAD does not match `VESL_CORE_PIN`. Soft warning on dirty/untracked working tree (line 79-83) — sync copies working tree, not HEAD, so uncommitted edits leak into the bundle. Documented.
+### L-22 — `tip5_to_atom_le_bytes` returns `vec![0]` for all-zero digest, not `vec![]`
 
-**`cp -rL` symlink dereference** (line 102-107, 191-210). Documented supply-chain risk. The script explicitly cautions: "Review incoming vesl changes like any supply-chain input."
+vesl-core. Convention mismatch. Either return `vec![]` or document the non-empty representation.
 
-**Path-dep → git-dep rewriting** (line 296-299). Regex-based `sed` substitution rewrites template Cargo.toml's nockchain path-deps to git-deps at `NOCK_PIN`. The regex anchors on `../../../nockchain/crates/...` so it matches only the three-level-up shape. graft-scaffold's own two-level-up paths are intentionally not rewritten. Correct.
+### L-23 — `ubig_to_be_32` panics on `n >= 2^256`
 
-**No kernel JAM in vesl-nockup.** Kernel JAMs live in vesl-core/assets/ and ship via the `kernels-{guard,mint,settle}` Rust crates that vesl-nockup doesn't mirror. vesl-nockup composes domain apps via `graft-inject` (codegen). This keeps the kernel-trust path narrow.
+vesl-wallet. Today only called with G_ORDER-bounded scalars; defensive.
 
-**`graft-inject` codegen** (`tools/graft-inject/src/codegen.rs`). Takes graft-manifest TOML files as input, emits Hoon between banner pairs in template kernels. Trust model: developers run this at scaffold time on manifests they wrote. Not a service. Risk: if a manifest is malicious, codegen emits malicious Hoon. Treat manifests like dependencies — vet them.
+### L-24 — `bs58::decode` allocates unbounded for malicious input
 
-**`--verify` mode** (line 335-378). CI uses this to catch hand-edits to bundled crates/templates and sync.sh logic changes not re-run. Sound design; catches drift but not malicious-sync.
+vesl-wallet. Cap at `MAX_B58_LEN` before decode.
 
-**No findings in vesl-nockup that don't already exist in vesl-core.** The vesl-signing / vesl-wallet crates are well-bounded, parity-tested against `nockchain-math`, and use proper domain separation (`vesl-hd-v1` for HD derivation, `siwn-v1` for SIWN, `x402-nockchain-v2` for x402, etc.). The Sign-In-With-Nockchain (CAIP-122) implementation correctly validates timestamps, replay-protects via `prefixed(domains::SIWN, nonce)`, and binds the signing pubkey to the message body's address field.
+### L-25 — `CheetahPoint::in_curve` panics rather than returning false on `ch_scal_big` error
 
-The one architectural finding worth mentioning is M-05/M-06 — the in-memory replay cache is OK for the current dev surface but not for a production facilitator. ADR-0010 acknowledges this.
+vesl-wallet. Edge-case off-curve points cause `in_curve()` to crash instead of cleanly rejecting.
+
+### L-26 — `SchnorrPrivateKey::public_key` panics on "healthy curve" assumption
+
+vesl-wallet. Brittle if curve constants change.
+
+### L-27 — `t8_to_scalar` error type leaks chunk content
+
+vesl-wallet. Use `BadChunk(usize)` (index) not `BadChunk(String)`.
+
+### L-28 — `.sync-pins.toml` documented "auto-generated" but committed as if canonical
+
+vesl-nockup. Reviewer confusion.
 
 ---
 
-## 9. What Was NOT Audited
+## 6. Cross-Cutting Recommendations
 
-- **`nockchain-math` and `zkvm-jetpack`** — treated as upstream-trusted. Audit boundary stops at the vesl-{signing,core} consumption layer.
-- **The Hoon STARK constraint generation pipeline** — `softed-constraints.hoon` and the constraint JAMs were assumed correct by version-pin. The constraint-completeness TODO (H-02) is the one acknowledgment that the verifier's understanding of these constraints needs second-reviewer signoff.
-- **Nockchain chain client (`nockchain-client-rs`)** — assumed correct; only the API shape was examined.
-- **The `vesl-checkpoint` crate** — out of scope; the checkpoint trait surface wasn't traced into kernels.
-- **Templates as end-user code** — templates' main.rs paths were not exhaustively read; they invoke `graft-inject` codegen at build time, which is itself audited.
-- **The Docker / docker-compose setup** — not examined.
-- **Network-level concerns** (TLS termination, ingress rate limiting, WAF) — assumed handled by ops.
+### CC-01 — Promote `based!` from `debug_assert!` to `assert!` upstream, OR enforce range-check at every vesl-core boundary
 
----
+This is the upstream lever for C-04. File an issue against nockchain. Until landed, every Tip5Hash construction at the vesl-core boundary must explicitly range-check.
 
-## 10. Recommended Next Steps
+### CC-02 — Audit the rest of `nockchain-math` for similar `debug_assert!` patterns
 
-In priority order. Items marked **DEFERRED** are tracked in §7 and revisited when upstream lands the cell-subject memory-table fix.
+`grep -rn 'debug_assert' nockchain/crates/nockchain-math/` shows multiple. Each is a potential cross-VM divergence vector in release builds. Document the contract: "downstream callers MUST validate inputs before invoking any nockchain-math primitive."
 
-1. **Fix C-01** before the hull is exposed to any external party. The fix is small (check effect list in commit_handler, error on empty) and the impact is large.
-2. ~~Add the STARK challenge-count invariant test (H-02)~~ — **DEFERRED per §7.** Add when re-applying the stash, against the post-upstream-fix verifier shape.
-3. **Audit signing call sites** for the H-04 message-uniqueness contract. Annotate each call with its freshness source as a comment.
-4. **Length-prefix or domain-separate leaf data** (H-03 remediation) at the SDK layer. Add `hash_leaf_domain` to vesl-merkle.hoon and the Rust mirror. Doing this **before** the stash re-apply means the new code paths (`belts-to-btree`, `verify-settlement-full`) inherit the safer primitive.
-5. **Remove `test-mode` from production verifier paths** (H-01). Durable across the upstream rewrite per §7.
-6. **Cap the SIWN replay window** server-side (M-07) and document the max in operator guides.
-7. **Add fuzz harness** for `tip5_to_atom_le_bytes` and `rejam_atom` (L-16, M-03).
-8. **Persistence story for the replay cache** (M-05) before mainnet.
+### CC-03 — Add a cargo-deny config to vesl-core matching vesl-wallet's
 
-The codebase is at the stage where most remaining risks are operational rather than cryptographic. The math holds. The kernel state machine is conservative. The Schnorr layer is sound. The advanced STARK prover/verifier work is staged out-of-tree pending upstream and will be re-applied as additive arms when ready. What needs work locally is the boundary where Rust meets HTTP meets caller-expectation — that's where C-01 lives, and that's where the next round of work should focus.
+vesl-wallet has a solid `deny.toml` (pins MIT/Apache-2.0/BSD, bans `openssl-sys`, denies wildcards/yanked/unknown-registries). vesl-core has none. CI runs `cargo audit` only. Adding `cargo deny check` is a one-line CI addition with high ROI.
+
+### CC-04 — Land a release-mode integration test suite that fuzzes cross-VM boundaries
+
+The hardest class of bug in this audit (C-04) only manifests in release builds. The test suite should:
+- Run in release mode.
+- Post off-field digests, malformed nouns, oversized jam blobs, CRLF-injected SIWN bodies, prove-error-returning %prove pokes, and assert each is *rejected*, not accepted-with-wrong-result.
 
 ---
 
-*Audit performed via whitebox source review of vesl-core @ `d613b05` and vesl-nockup @ working tree, on 2026-05-16.*
+## 7. Items Reviewed With No Findings
+
+For audit completeness, the following files were inspected and produced no actionable findings:
+
+- `vesl-core/protocol/lib/intent-graft.hoon` — intentional placeholder per project memory.
+- `vesl-core/protocol/lib/clock-graft.hoon` (modulo M-06 doc note).
+- `vesl-core/protocol/lib/log-graft.hoon` — append-only, retention-capped, mule-wrapped.
+- `vesl-core/protocol/lib/counter-graft.hoon` — saturation guards in place.
+- `vesl-core/protocol/lib/queue-graft.hoon`, `registry-graft.hoon`, `kv-graft.hoon`, `batch-graft.hoon`, `rbac-graft.hoon` — capped, mule-wrapped, clean.
+- `vesl-core/protocol/sur/vesl.hoon` — type definitions only.
+- `vesl-core/protocol/tests/red-team.hoon` — existing red team covers fake-sibling, path-swap, context-padding, prompt-injection. Does NOT cover any of C-01 through C-09. Suggest extending.
+- `vesl-core/protocol/lib/vesl-verifier.hoon` — C-lead-4 pin in place.
+- `vesl-core/assets/CHECKSUMS.sha256` — verified matches `sha256sum assets/*.jam`.
+- `vesl-wallet/crates/vesl-wallet-spec/src/lib.rs` — spec doc; no impl logic.
+- `vesl-wallet/deny.toml` — solid policy (CC-03 above).
+
+---
+
+## 8. Cross-Reference to Prior Audit (`AUDIT_REPORT.md` pre-2026-05-19)
+
+| Prior ID | Description | Status @ 2026-05-19 | This audit's ID |
+|---|---|---|---|
+| C-01 | Hull /commit silent desync | **Migrated** — hull moved to vesl-nockup/crates/vesl-hull as library. Prior C-01 surface re-shaped. This audit's C-01 is independent (kernel-integrity gate). | C-01 (new context) |
+| H-01 | STARK verifier `test-mode` | **Unfixed** | C-02 |
+| H-02 | C-lead-2 verifier completeness | Deferred per prior §7; not re-evaluated here. | — |
+| H-03 | hash_leaf trailing-zero | **Unfixed** | M-09 |
+| H-04 | Schnorr message-uniqueness | **Annotations not landed** | — (see H-04 here for shim path) |
+| M-01 | Global rate limit | Migrated to vesl-hull; not re-audited in this slice. | — |
+| M-02 | poke_kernel_with_timeout discards effects | Covered by C-01 surgical fix per prior §6. | — |
+| M-03 | rejam_atom panic | **Unfixed** | H-12 |
+| M-04 | Settled set unbounded | **Unfixed** | H-01 (Hoon side) / H-07 (Rust side) |
+| M-05 | Replay cache in-memory | **Unfixed** | M-14 |
+| M-06 | Replay cache no cap | **Unfixed** | (subset of M-14) |
+| M-07 | SIWN window cap | **Unfixed** | H-13 |
+| M-08 | Schnorr from_belts overflow | **Fixed in vesl-wallet only**; shim path needs verification | H-04 |
+| M-09 | Demo signing key gate | **Unfixed** | H-15 |
+| L-01..L-17 | Various | Mostly informational; flagged again where promoted to higher severity. | Various |
+
+---
+
+## 9. Recommended Beta-Ship Order
+
+In priority order. **Items 1-9 are non-negotiable for a public beta release.**
+
+1. **C-01** — Make `verify_kernel()` non-opt-in; templates load via `kernels-*` crates, not `fs::read("out.jam")`.
+2. **C-02** — Land `?>  =(test-mode %.n)` per `AUDIT_H01_TEST_MODE.md` Option B. Regenerate JAMs.
+3. **C-03** — Sieve `each %& %|` in `forge-kernel.hoon` and `vesl-kernel.hoon` %prove arms.
+4. **C-04** — `Tip5Hash` newtype with `from_limbs` range-check; audit every construction site. File upstream `based!` issue.
+5. **C-05** — Sanitize SIWN message-body fields against `\n`/`\r`/control chars. Strict parser.
+6. **C-06** — Replay-cache key includes message digest (or `(domain, chain_id, address, nonce)` tuple).
+7. **C-07** — `verify` enforces `chain_id`, `uri`, `version` against expected deployment values.
+8. **C-08** — Push `vesl-core-sync.yml` to `origin/dev` and `origin/main`.
+9. **C-09** — Fix sync workflow diff command; align CI pins with sync.sh; add `git ls-remote` pre-flight.
+
+After 1-9:
+
+10. **H-04, H-13, H-14, H-15** — Schnorr shim range-check, SIWN window cap, curve-membership check, demo-key gate.
+11. **H-01, H-02, H-03** — Kernel caps, vesl-entrypoint disposition, forge-kernel verify-chunk crash.
+12. **H-05, H-06, H-07, H-08** — RagVerifier note_id binding, manifest size cap, settled_ids LRU, kernel-poke timeouts.
+13. **H-09, H-10, H-11, H-12** — Boundary panics + DoS + TLS defaults.
+14. **H-16, H-17, H-18** — sync.sh injection / cp-rL / symlink trust.
+15. **H-19, H-20, H-21, H-22** — Template build.rs PATH-RCE, checkpoint resume verification, Dockerfile alignment, CI nockchain checkout.
+16. **CC-03, CC-04** — cargo-deny in CI, release-mode boundary fuzz suite.
+17. Medium tier — schedule for v0.2 / first post-beta point release.
+18. Low / informational — opportunistic cleanup.
+
+The math holds. The kernel state machine is conservative where it shipped fixes. The Schnorr layer is mostly sound. **What needs work is the gap between what the audits documented and what the code actually does.** A startling number of prior-cycle items are documented-fixed but code-unfixed. Closing that gap is what beta-readiness looks like.
+
+---
+
+**End of report.**
