@@ -36,7 +36,7 @@ Findings whose remediation cuts across both repos (e.g. C-03) will land as paire
 
 **Verdict: NOT READY FOR BETA.** Three independent classes of critical findings would each, on their own, justify holding the release.
 
-1. **Kernel-integrity gate is disconnected from the production code path.** `kernels-{guard,mint,settle}::verify_kernel()` exists, sha256-hashes the embedded JAM, panics on mismatch — and is **never called by any caller in vesl-core, vesl-nockup, or any of the nine templates**. The actual production path is `let kernel = fs::read("out.jam")?` across every shipped template. An attacker who can replace `out.jam` at deploy time (directory write, supply-chain compromise, careless overwrite) boots a swapped kernel with no integrity check. C-01 (Rust Vessel).
+1. **Kernel-integrity gate is disconnected from the production code path.** `kernels-{guard,mint,settle,forge}::verify_kernel()` (vesl-core) and `kernels_vesl::verify_kernel()` (hull-llm) exist, sha256-hash the embedded JAM, panic on mismatch — and are **never called by any caller in vesl-core, hull-llm, vesl-nockup, or any of the nine templates**. The actual production path is `let kernel = fs::read("out.jam")?` across every shipped template. An attacker who can replace `out.jam` at deploy time (directory write, supply-chain compromise, careless overwrite) boots a swapped kernel with no integrity check. C-01 (Rust Vessel).
 
 2. **The STARK soundness boundary is currently bypassed in two independent ways.** First, the `test-mode` parameter on `+verify` and `+verify-settlement` (`AUDIT_H01_TEST_MODE.md` Option B; tracked since 2026-04-19) **is still not asserted closed** — any caller that passes `%.y` silently disables Merkle-opening verification. Second, the `forge-kernel.hoon` (vesl-core) and `vesl-kernel.hoon` (now in hull-llm after the architectural cleanup) `%prove` arms check only the *outer mule head* of `prove-computation`, not the inner `each %& %|` discriminator — a prover error noun (`[%| %too-big ...]`) is treated as a valid proof, the note is permanently settled, and a structurally-shaped "proof" is emitted. **Deferred to follow-up session.** C-02, C-03 (Hoon protocol).
 
@@ -186,9 +186,10 @@ When `prove-computation` returns `[%| %too-big heights=...]` without crashing, t
 
 The state corruption is silent: the kernel slog says nothing.
 
-**Verification.** Confirmed by reading `forge-kernel.hoon:256-271`, `vesl-kernel.hoon:106-117`, and `nockchain/hoon/common/stark/prover.hoon:39-40`. The `prove-result` shape is genuinely `(each proof err)`. The mule check is genuinely only on the outer head.
+**Verification.** Confirmed by reading `forge-kernel.hoon:256-271` (vesl-core), `vesl-kernel.hoon` `handle-prove` (now in hull-llm), and `nockchain/hoon/common/stark/prover.hoon:39-40`. The `prove-result` shape is genuinely `(each proof err)`. The mule check is genuinely only on the outer head.
 
-**Remediation.**
+**Remediation.** Lands across two repos (`forge-kernel.hoon` in vesl-core, `vesl-kernel.hoon` in hull-llm). Each kernel applies the same shape:
+
 ```hoon
 =/  proof-attempt
   %-  mule  |.
@@ -207,7 +208,7 @@ The state corruption is silent: the kernel slog says nothing.
 ~[[result-note the-proof]]
 ```
 
-Mirror in `vesl-kernel.hoon:106-117` (`handle-prove`).
+Mirror in `hull-llm/protocol/lib/vesl-kernel.hoon` `handle-prove`, substituting the slog tag.  Each fix lands as a dedicated commit in its own repo with a paired JAM regen.
 
 ---
 
@@ -408,14 +409,14 @@ Per CLAUDE.md §7 and `AUDIT_FOLLOWUP_INDEX.md`, this workflow is the gate that 
 
 ### H-01 — Production Hoon kernels lack capacity caps on `registered` and `settled` maps
 
-**Repo:** vesl-core
+**Repo:** vesl-core (kernel-arms, guard, mint, settle, forge) + hull-llm (vesl-kernel, post-cleanup)
 **Files:**
-- `protocol/lib/kernel-arms.hoon:17-23` (`handle-register`)
-- `protocol/lib/settle-kernel.hoon:30-32, 99-101`
-- `protocol/lib/vesl-kernel.hoon:40-44, 113-115`
-- `protocol/lib/forge-kernel.hoon:22-27, 269`
+- `vesl-core/protocol/lib/kernel-arms.hoon:17-23` (`handle-register`)
+- `vesl-core/protocol/lib/settle-kernel.hoon:30-32, 99-101`
+- `hull-llm/protocol/lib/vesl-kernel.hoon` (versioned-state `+$` block; lines shifted post-Phase-4 import refactor)
+- `vesl-core/protocol/lib/forge-kernel.hoon:22-27, 269`
 
-The audit comments labeled `AUDIT 2026-04-17 H-02` added 10M caps to every graft library (`mint-graft`, `guard-graft`, `settle-graft`, `kv-graft`, etc.) — but `kernel-arms.hoon`'s `+handle-register` and the production kernels themselves have NO cap. The shipped guard/mint/settle/vesl/forge kernels are what compile to the JAM artifacts. The grafts protect downstream app composers; the production kernels are exposed.
+The audit comments labeled `AUDIT 2026-04-17 H-02` added 10M caps to every graft library (`mint-graft`, `guard-graft`, `settle-graft`, `kv-graft`, etc.) — but `kernel-arms.hoon`'s `+handle-register` and the production kernels themselves have NO cap. The shipped guard/mint/settle/forge kernels (vesl-core) and vesl-kernel (hull-llm) are what compile to JAM artifacts. The grafts protect downstream app composers; the production kernels are exposed.
 
 Production `settled` set never rotates. `settle-graft.hoon` rotates at 1M settles; production `settle-kernel.hoon`, `vesl-kernel.hoon`, `forge-kernel.hoon` have unbounded `set @`. Each successful settle grows kernel state permanently.
 
@@ -427,14 +428,16 @@ Production `settled` set never rotates. `settle-graft.hoon` rotates at 1M settle
 
 ### H-02 — `vesl-entrypoint.hoon` bypasses all settlement guards (registration, root match, replay)
 
-**Repo:** vesl-core
-**File:** `protocol/lib/vesl-entrypoint.hoon:33-38`
+**Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
+**File:** `hull-llm/protocol/lib/vesl-entrypoint.hoon`
 
 The "STAGED" entrypoint arm directly calls `settle-note` with `expected-root.args` and the manifest, both attacker-controlled. No `registered` check, no `expected-root` cross-check, no replay set, no `note.root == expected-root` check. The arm produces a `[id=@ hull=@ root=@ state=[%settled ~]]` for any hull/id the attacker chooses, indistinguishable at the type level from a legitimate settlement.
 
 Latent today (no shipped kernel composes `vesl-entrypoint`), but one `/+` import away from production. The `:: STAGED:` header tag is documentation, not a guard.
 
-**Fix:** Move to `protocol/tests/`, or make the arm bang (`!!`) with a STAGED trace, or wire in the full `validate-settlement-args` check.
+The file moved to hull-llm in the architectural cleanup (it imports `rag-logic` and operates on the RAG manifest type). The finding semantics are unchanged — the staged code path is just as risky in hull-llm as it was in vesl-core, since vesl-kernel.hoon (also in hull-llm) is one `/+` import away from composing it.
+
+**Fix:** Move to `hull-llm/protocol/tests/`, or make the arm bang (`!!`) with a STAGED trace, or wire in the full `validate-settlement-args` check via kernel-arms.
 
 ---
 
@@ -460,8 +463,8 @@ Latent today (no shipped kernel composes `vesl-entrypoint`), but one `/+` import
 
 ### H-05 — `RagVerifier::verify` ignores `note_id` despite the trait being audited specifically to add it
 
-**Repo:** vesl-core
-**File:** `crates/vesl-core/src/settle.rs:31`
+**Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
+**File:** `hull-llm/src/rag_verifier.rs`
 
 The `CommitmentVerifier::verify` trait was updated to take `note_id: u64` (per `types.rs:95-99` comment — "AUDIT 2026-04-17 H-03: `verify` takes `note_id` so domain verifiers can enforce `note_id == deterministic_fn(data)`, closing the pre-commit race"). The shipped `RagVerifier` impl ignores the argument:
 ```rust
@@ -475,12 +478,14 @@ Every `Settle<RagVerifier>` consumer is vulnerable to the pre-commit race the tr
 
 ### H-06 — `RagVerifier::verify` and `build_settle_poke` allocate before bounding manifest size → OOM-class DoS
 
-**Repo:** vesl-core
-**Files:** `crates/vesl-core/src/settle.rs:32-38, 80`; `crates/vesl-core/src/guard.rs:118-133`
+**Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
+**Files:** `hull-llm/src/rag_verifier.rs` (verify body); `hull-llm/src/manifest_pokes.rs` (build_settle_poke body)
 
 `serde_json::from_slice(data)?` runs against caller-supplied bytes; the `manifest.results.len() > 10_000` / `total_bytes > 10_000_000` checks happen after deserialization. An attacker submitting 1 GB of well-formed JSON allocates the full graph before bound check fires.
 
-**Fix:** Add `if data.len() > MAX_MANIFEST_BYTES { return false; }` (or equivalent) **before** the `from_slice`.
+The companion `Guard::check_manifest` / `Guard::validate_manifest` methods in `vesl-core/crates/vesl-core/src/guard.rs:118-133` were deleted in the architectural cleanup (Guard is now generic). The semantic check moved entirely into hull-llm's `RagVerifier::verify`; the size-check ordering issue moved with it.
+
+**Fix:** Add `if data.len() > MAX_MANIFEST_BYTES { return false; }` (or equivalent) **before** the `from_slice` in `RagVerifier::verify`.
 
 ---
 
@@ -680,19 +685,19 @@ The workflow's own comment: "Full CI requires either (a) a checkout step that cl
 
 ### M-01 — Empty `results` list bypasses `verify-manifest` in Hoon kernel
 
-**Repo:** vesl-core
-**File:** `protocol/lib/rag-logic.hoon:66-86`
+**Repo:** hull-llm (post-cleanup)
+**File:** `hull-llm/protocol/lib/rag-logic.hoon` (`+verify-manifest`)
 
-`verify-manifest` returns `%.y` for `(results=~, prompt==query)` — no Merkle verification runs. The Rust hull catches this (`guard.rs:142-144`), but direct kernel pokes don't go through the Rust hull. Combined with H-02 (unsigned register), an attacker with kernel poke access can mint "settled" notes for arbitrary (id, hull) with zero data binding.
+`verify-manifest` returns `%.y` for `(results=~, prompt==query)` — no Merkle verification runs. The companion Rust check (formerly in vesl-core's `guard.rs:142-144`) was lifted into hull-llm's `RagVerifier::verify`, which catches the empty-results case — but direct kernel pokes still don't go through the Rust hull. Combined with H-01 (unsigned register), an attacker with kernel poke access can mint "settled" notes for arbitrary (id, hull) with zero data binding.
 
 **Fix:** `?>  !=(~ results.mani)` at the top of `verify-manifest`.
 
 ### M-02 — Hoon `verify-manifest` doesn't enforce dup-id or null-byte chunk rules that Rust enforces
 
-**Repo:** vesl-core
-**File:** `protocol/lib/rag-logic.hoon:66-86` vs `crates/vesl-core/src/guard.rs:142-163`
+**Repo:** hull-llm (post-cleanup)
+**File:** `hull-llm/protocol/lib/rag-logic.hoon` (`+verify-manifest`) vs `hull-llm/src/rag_verifier.rs` (`RagVerifier::verify`)
 
-Rust rejects duplicate chunk IDs and chunks containing null bytes. Hoon doesn't. Strictly weaker on the direct-kernel-poke path.
+Rust rejects duplicate chunk IDs and chunks containing null bytes. Hoon doesn't. Strictly weaker on the direct-kernel-poke path. (Both files now live in hull-llm; the divergence is internal to the verified-RAG vertical.)
 
 ### M-03 — `verify-chunk` crashes (not %.n) on out-of-range sibling atoms
 
@@ -856,8 +861,8 @@ Returns `Some(0)` for both "path didn't bind" and "path bound to zero." Critical
 
 ### M-21 — `build_settle_note_manifest_poke` silently coerces non-UTF8 field names to empty string
 
-**Repo:** vesl-core
-**File:** `crates/vesl-core/src/graft_pokes/settle.rs:242`
+**Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
+**File:** `hull-llm/src/manifest_pokes.rs` (`build_settle_note_manifest_poke`)
 
 `std::str::from_utf8(name).unwrap_or("")`. A field name that's not valid UTF-8 silently becomes `""`. Manifest binds wrong name; verification fails opaquely.
 
@@ -1139,7 +1144,7 @@ In priority order. **Items 1-9 are non-negotiable for a public beta release.**
 
 1. **C-01** — Make `verify_kernel()` non-opt-in; templates load via `kernels-*` crates, not `fs::read("out.jam")`.
 2. **C-02** — Land `?>  =(test-mode %.n)` per `AUDIT_H01_TEST_MODE.md` Option B. Regenerate JAMs.
-3. **C-03** — Sieve `each %& %|` in `forge-kernel.hoon` and `vesl-kernel.hoon` %prove arms.
+3. **C-03** — Sieve `each %& %|` in `vesl-core/protocol/lib/forge-kernel.hoon` and `hull-llm/protocol/lib/vesl-kernel.hoon` `%prove` arms (cross-repo; paired commits + JAM regens in each repo).
 4. **C-04** — `Tip5Hash` newtype with `from_limbs` range-check; audit every construction site. File upstream `based!` issue.
 5. **C-05** — Sanitize SIWN message-body fields against `\n`/`\r`/control chars. Strict parser.
 6. **C-06** — Replay-cache key includes message digest (or `(domain, chain_id, address, nonce)` tuple).
