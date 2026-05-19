@@ -264,12 +264,24 @@
         :_  state
         ^-  (list effect)
         ~[[%prove-failed (jam p.proof-attempt)]]
+      ::  AUDIT 2026-05-19 C-03: sieve `prove-computation`'s `each` variant.
+      ::  `mule` only catches crashes — a successful return of `[%| err]`
+      ::  (e.g. [%| %too-big heights=...]) has -.proof-attempt = %.y. Without
+      ::  this sieve, the kernel falls through to "settled" with an error
+      ::  noun as the emitted proof, permanently blocking re-settle of id.
+      ::
+      ?.  ?=(%& -.p.proof-attempt)
+        ~>  %slog.[3 'forge: prover returned error variant']
+        :_  state
+        ^-  (list effect)
+        ~[[%prove-failed (jam p.proof-attempt)]]
       ::  Proof succeeded — settle and return [result-note proof]
       ::
+      =/  the-proof  +.p.proof-attempt
       =/  new-settled  (~(put in settled.state) id.note.args)
       :_  state(settled new-settled)
       ^-  (list effect)
-      ~[[result-note p.proof-attempt]]
+      ~[[result-note the-proof]]
     ==
   --
 --
