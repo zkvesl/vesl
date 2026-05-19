@@ -14,11 +14,31 @@
 
 ## 1. Executive Summary
 
+**2026-05-19 architectural cleanup (post-audit).** As a precondition for landing the C-02/C-03 fixes against the right repo, this audit triggered a structural refactor that extracted all RAG-specific code from vesl-core into hull-llm. Vesl-core is now genuinely domain-agnostic infrastructure: the shipped guard/mint/settle/forge kernels do not import `rag-logic`, the `Manifest`/`Retrieval`/`Chunk` Rust types and the `RagVerifier` impl live in hull-llm, and `vesl-stark.hoon`/`vesl-kernel.hoon`/`vesl-entrypoint.hoon` (all of which depend on the RAG `manifest` type) moved to hull-llm too. Hull-llm gained its own Hoon source tree (`protocol/{lib,sur}/`, `hoon/`, `scripts/check-jam.sh`, JAM-determinism CI), a `vendor-libs.sh` script that pulls vesl-core's generic libs one-way at a pinned rev, and full ownership of its kernel JAM build pipeline. Forge kernel + JAM relocated from hull-llm into vesl-core to correct an earlier source-of-truth inversion (forge is generic). C-02 and C-03 vulnerability fixes are deferred to a follow-up session against this new topology.
+
+**Post-cleanup file map.** Findings below cite pre-cleanup file paths; use this table to translate to the post-cleanup layout (vesl-core@284a20a / hull-llm@2757b1b):
+
+| Pre-cleanup path | Post-cleanup location |
+|---|---|
+| `vesl-core/protocol/lib/rag-logic.hoon` | `hull-llm/protocol/lib/rag-logic.hoon` |
+| `vesl-core/protocol/lib/vesl-kernel.hoon` | `hull-llm/protocol/lib/vesl-kernel.hoon` |
+| `vesl-core/protocol/lib/vesl-entrypoint.hoon` | `hull-llm/protocol/lib/vesl-entrypoint.hoon` |
+| `vesl-core/protocol/lib/vesl-stark.hoon` | `hull-llm/protocol/lib/vesl-stark.hoon` |
+| `vesl-core/protocol/sur/vesl.hoon` (manifest, retrieval types) | `hull-llm/protocol/sur/rag.hoon` |
+| `vesl-core/crates/vesl-core/src/types.rs` (Chunk, Manifest, Retrieval) | `hull-llm/src/manifest.rs` |
+| `vesl-core/crates/vesl-core/src/settle.rs` (RagVerifier impl) | `hull-llm/src/rag_verifier.rs` |
+| `vesl-core/crates/vesl-core/src/settle.rs` (build_settle_poke, build_prove_poke) | `hull-llm/src/manifest_pokes.rs` |
+| `vesl-core/crates/vesl-core/src/graft_pokes/settle.rs` (build_settle_note_manifest_poke) | `hull-llm/src/manifest_pokes.rs` |
+| `vesl-core/crates/vesl-core/src/guard.rs` (check_manifest, validate_manifest) | DELETED — RAG-specific verification logic moved into `hull-llm/src/rag_verifier.rs::RagVerifier::verify` |
+| `hull-llm/kernels/forge/` + `hull-llm/assets/forge.jam` | `vesl-core/kernels/forge/` + `vesl-core/assets/forge.jam` |
+
+Findings whose remediation cuts across both repos (e.g. C-03) will land as paired commits.
+
 **Verdict: NOT READY FOR BETA.** Three independent classes of critical findings would each, on their own, justify holding the release.
 
 1. **Kernel-integrity gate is disconnected from the production code path.** `kernels-{guard,mint,settle}::verify_kernel()` exists, sha256-hashes the embedded JAM, panics on mismatch — and is **never called by any caller in vesl-core, vesl-nockup, or any of the nine templates**. The actual production path is `let kernel = fs::read("out.jam")?` across every shipped template. An attacker who can replace `out.jam` at deploy time (directory write, supply-chain compromise, careless overwrite) boots a swapped kernel with no integrity check. C-01 (Rust Vessel).
 
-2. **The STARK soundness boundary is currently bypassed in two independent ways.** First, the `test-mode` parameter on `+verify` and `+verify-settlement` (`AUDIT_H01_TEST_MODE.md` Option B; tracked since 2026-04-19) **is still not asserted closed** — any caller that passes `%.y` silently disables Merkle-opening verification. Second, the `forge-kernel.hoon` and `vesl-kernel.hoon` `%prove` arms check only the *outer mule head* of `prove-computation`, not the inner `each %& %|` discriminator — a prover error noun (`[%| %too-big ...]`) is treated as a valid proof, the note is permanently settled, and a structurally-shaped "proof" is emitted. C-02, C-03 (Hoon protocol).
+2. **The STARK soundness boundary is currently bypassed in two independent ways.** First, the `test-mode` parameter on `+verify` and `+verify-settlement` (`AUDIT_H01_TEST_MODE.md` Option B; tracked since 2026-04-19) **is still not asserted closed** — any caller that passes `%.y` silently disables Merkle-opening verification. Second, the `forge-kernel.hoon` (vesl-core) and `vesl-kernel.hoon` (now in hull-llm after the architectural cleanup) `%prove` arms check only the *outer mule head* of `prove-computation`, not the inner `each %& %|` discriminator — a prover error noun (`[%| %too-big ...]`) is treated as a valid proof, the note is permanently settled, and a structurally-shaped "proof" is emitted. **Deferred to follow-up session.** C-02, C-03 (Hoon protocol).
 
 3. **The cross-VM Tip5 boundary admits chainsplit-class divergence in release builds.** `nockchain-math`'s `based!` macro is `debug_assert!` (release-mode no-op). `nockchain-tip5-rs` constructs `Tip5Hash` limbs (`[u64; 5]`) at the Rust API surface without validating that each limb is below the Goldilocks prime. The Hoon verifier normalizes inputs via `atom-to-digest`'s modular reduction; Rust does not. Off-field digests produce *different* digests on each side. Anywhere a Rust off-chain verification result feeds a Hoon-verified state (settlement effect, receipt bridge, future on-chain submission) creates a chainsplit primitive. C-04 (Boundary).
 
@@ -137,10 +157,10 @@ Then regenerate `assets/{guard,mint,settle}.jam` and `assets/CHECKSUMS.sha256` p
 ### C-03 — `forge-kernel.hoon` and `vesl-kernel.hoon` `%prove` treat `prove-result %| err` as success; permanently settle on prover error
 
 **Severity:** Critical (fake settlement via prover error path)
-**Repo:** vesl-core
+**Repo:** vesl-core (forge-kernel) + hull-llm (vesl-kernel, post-cleanup)
 **Files:**
-- `protocol/lib/forge-kernel.hoon:256-272`
-- `protocol/lib/vesl-kernel.hoon:106-117` (`handle-prove`)
+- `vesl-core/protocol/lib/forge-kernel.hoon:256-272`
+- `hull-llm/protocol/lib/vesl-kernel.hoon` (handle-prove arm; line numbers shifted after the Phase 4 import refactor)
 
 **Description.** `prove-computation` returns `prove-result = (each =proof err=prove-err)` where `prove-err` includes `[%too-big heights=(list @)]` (defined in `nockchain/hoon/common/stark/prover.hoon:39-40`). The kernel wraps the call in `mule` and checks only `-.proof-attempt` — the *outer* mule head (`%&` = mule didn't crash). It does NOT check `-.p.proof-attempt` — the *inner* `each` head distinguishing `[%& proof]` from `[%| err]`.
 
