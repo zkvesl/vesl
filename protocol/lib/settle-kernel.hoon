@@ -1,9 +1,11 @@
 ::  settle-kernel.hoon: heavy tier — full settlement, no STARK
 ::
-::  NockApp kernel for Merkle root registration, manifest verification,
-::  and note settlement.  Everything vesl-kernel.hoon does, minus the
-::  STARK prover and tx-engine.  Settlement is where soft state becomes
-::  hard record.
+::  NockApp kernel for Merkle root registration, generic payload
+::  verification, and note settlement.  Domain-agnostic: verifies
+::  payload integrity via vesl-merkle.verify-payload, then transitions
+::  the note from %pending to %settled.  No prompt reconstruction, no
+::  manifest semantics — that lives in domain-specific kernels (e.g.
+::  hull-llm's vesl-kernel) that wrap this layer.
 ::
 ::  Why no tx-engine: sig-hash/tx-id computation pulled in tx-engine-0
 ::  (71K lines, 135s compile) making the JAR 18MB — same as forge.
@@ -12,14 +14,14 @@
 ::
 ::  Poke causes:
 ::    [%register hull=@ root=@]  — register a hull's Merkle root
-::    [%settle payload=@]          — verify manifest + settle note
-::    [%verify payload=@]          — verify manifest (read-only)
+::    [%settle payload=@]          — verify payload + settle note
+::    [%verify payload=@]          — verify payload (read-only)
 ::
 ::  Compiled: hoonc --new protocol/lib/settle-kernel.hoon hoon/
 ::  Output:   assets/settle.jam
 ::
 /-  *vesl
-/+  *rag-logic
+/+  *vesl-merkle
 /+  *kernel-arms
 /=  *  /common/wrapper
 ::
@@ -83,40 +85,61 @@
       ^-  (list effect)
       ~[[%registered hull.u.act root.u.act]]
       ::
-      ::  %settle — verify manifest and transition note to %settled
+      ::  %settle — verify payload and transition note to %settled
       ::    Guards: root must be registered, note ID must not be settled
       ::
         %settle
-      =/  parsed  (parse-payload payload.u.act)
-      ?~  parsed
+      =/  attempt
+        %-  mule  |.
+        =/  raw  (cue payload.u.act)
+        ;;(settlement-payload raw)
+      ?:  ?=(%| -.attempt)
         ~>  %slog.[3 'settle: malformed settle payload']
         :_  state
         ^-  (list effect)
         ~[[%settle-error 'settle: malformed payload']]
-      =/  res  (validate-settlement-args u.parsed registered.state settled.state %mutate 'settle:')
-      ?:  ?=(%.n -.res)  [~ state]
-      =/  args=settlement-payload  args.res
-      =/  result  (settle-note note.args mani.args expected-root.args)
+      =/  args=settlement-payload  p.attempt
+      =/  validation
+        %-  validate-settlement-args
+        [note.args expected-root.args registered.state settled.state %mutate 'settle:']
+      ?:  ?=(%.n -.validation)  [~ state]
+      =/  ok=?
+        %-  verify-payload
+        [leaves.args proofs.args expected-root.args]
+      ?.  ok
+        ~>  %slog.[3 'settle: payload verification failed']
+        :_  state
+        ^-  (list effect)
+        ~[[%settle-error 'settle: payload verification failed']]
+      =/  settled-note=[id=@ hull=@ root=@ state=[%settled ~]]
+        [id.note.args hull.note.args root.note.args [%settled ~]]
       =/  new-settled  (~(put in settled.state) id.note.args)
       :_  state(settled new-settled)
       ^-  (list effect)
-      ~[result]
+      ~[settled-note]
       ::
-      ::  %verify — verify manifest (read-only, no state change)
+      ::  %verify — verify payload (read-only, no state change)
       ::
         %verify
-      =/  parsed  (parse-payload payload.u.act)
-      ?~  parsed
+      =/  attempt
+        %-  mule  |.
+        =/  raw  (cue payload.u.act)
+        ;;(settlement-payload raw)
+      ?:  ?=(%| -.attempt)
         :_  state
         ^-  (list effect)
         ~[[%verified %.n]]
-      =/  res  (validate-settlement-args u.parsed registered.state settled.state %verify 'settle:')
-      ?:  ?=(%.n -.res)
+      =/  args=settlement-payload  p.attempt
+      =/  validation
+        %-  validate-settlement-args
+        [note.args expected-root.args registered.state settled.state %verify 'settle:']
+      ?:  ?=(%.n -.validation)
         :_  state
         ^-  (list effect)
         ~[[%verified %.n]]
-      =/  args=settlement-payload  args.res
-      =/  ok=?  (verify-manifest mani.args expected-root.args)
+      =/  ok=?
+        %-  verify-payload
+        [leaves.args proofs.args expected-root.args]
       :_  state
       ^-  (list effect)
       ~[[%verified ok]]

@@ -57,6 +57,20 @@
       [%diag-sieve seeds-jam=@]
       [%diag-hash seeds-jam=@ fee=@]
   ==
+::  Local payload shape — vesl-kernel's RAG-specific extension of the
+::  generic settlement-payload from sur/vesl.hoon.  Wraps a manifest
+::  (vs. the generic leaves/proofs lists) so rag-logic's verify-manifest
+::  and settle-note can consume it directly.
+::
+::  Moves to hull-llm/protocol/sur/rag.hoon in the architectural-split
+::  refactor's Phase 4 — at which point this file relocates to hull-llm
+::  too and the local definition can become a /- import.
+::
++$  rag-settlement-payload
+  $:  note=[id=@ hull=@ root=@ state=[%pending ~]]
+      mani=manifest
+      expected-root=@
+  ==
 --
 |%
 ++  moat  (keep versioned-state)
@@ -73,15 +87,20 @@
 ++  handle-settle
   |=  [state=versioned-state act=[%settle payload=@]]
   ^-  [(list effect) versioned-state]
-  =/  parsed  (parse-payload payload.act)
-  ?~  parsed
+  =/  attempt
+    %-  mule  |.
+    =/  raw  (cue payload.act)
+    ;;(rag-settlement-payload raw)
+  ?:  ?=(%| -.attempt)
     ~>  %slog.[3 'vesl: malformed settle payload']
     :_  state
     ^-  (list effect)
     ~[[%settle-error 'vesl: malformed payload']]
-  =/  res  (validate-settlement-args u.parsed registered.state settled.state %mutate 'vesl:')
-  ?:  ?=(%.n -.res)  [~ state]
-  =/  args=settlement-payload  args.res
+  =/  args=rag-settlement-payload  p.attempt
+  =/  validation
+    %-  validate-settlement-args
+    [note.args expected-root.args registered.state settled.state %mutate 'vesl:']
+  ?:  ?=(%.n -.validation)  [~ state]
   =/  result  (settle-note note.args mani.args expected-root.args)
   =/  new-settled  (~(put in settled.state) id.note.args)
   :_  state(settled new-settled)
@@ -91,15 +110,20 @@
 ++  handle-prove
   |=  [state=versioned-state act=[%prove payload=@]]
   ^-  [(list effect) versioned-state]
-  =/  parsed  (parse-payload payload.act)
-  ?~  parsed
+  =/  attempt
+    %-  mule  |.
+    =/  raw  (cue payload.act)
+    ;;(rag-settlement-payload raw)
+  ?:  ?=(%| -.attempt)
     ~>  %slog.[3 'vesl: malformed prove payload']
     :_  state
     ^-  (list effect)
     ~[[%prove-error 'vesl: malformed payload']]
-  =/  res  (validate-settlement-args u.parsed registered.state settled.state %mutate 'vesl:')
-  ?:  ?=(%.n -.res)  [~ state]
-  =/  args=settlement-payload  args.res
+  =/  args=rag-settlement-payload  p.attempt
+  =/  validation
+    %-  validate-settlement-args
+    [note.args expected-root.args registered.state settled.state %mutate 'vesl:']
+  ?:  ?=(%.n -.validation)  [~ state]
   =/  result-note  (settle-note note.args mani.args expected-root.args)
   =/  belt-digest=@  (split-and-fold mani.args)
   =/  fs-formula=*  build-fs-formula

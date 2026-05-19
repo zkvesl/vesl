@@ -26,6 +26,11 @@
 ::                    folds up an internal Merkle node.
 ::    verify-chunk    prove a chunk is bound to a Merkle root via
 ::                    a sibling-hash proof.  Depth-capped at 64.
+::    verify-payload  generic Merkle-inclusion check over parallel
+::                    lists of leaves and proofs against an expected
+::                    root.  Domain-agnostic; used by guard/settle
+::                    kernels in place of any RAG-specific manifest
+::                    verifier.
 ::    split-to-belts  atom -> 7-byte field-element list.  Used by
 ::                    forge's belt-digest fold and by any gate that
 ::                    wants to hash cell-shaped data as a flat atom.
@@ -128,4 +133,27 @@
       (hash-pair hash.i.proof cur)
     (hash-pair cur hash.i.proof)
   $(cur nex, proof t.proof)
+::
+::  +verify-payload: generic Merkle-inclusion check over parallel lists
+::
+::  Walks (leaves, proofs) in lock-step.  Each leaf must hash to a leaf
+::  position whose sibling chain resolves to expected-root.  Returns
+::  %.y iff lists are equal-length AND every (leaf, proof) pair verifies.
+::
+::  Domain-agnostic.  guard-kernel and settle-kernel call this in place
+::  of any RAG-specific verifier.  RAG manifest verification (prompt
+::  reconstruction etc.) lives outside this primitive — wrap it.
+::
+++  verify-payload
+  |=  $:  leaves=(list @t)
+          proofs=(list (list [hash=@ side=?]))
+          expected-root=@
+      ==
+  ^-  ?
+  ?.  =((lent leaves) (lent proofs))  %.n
+  |-
+  ?~  leaves  %.y
+  ?~  proofs  %.n
+  ?.  (verify-chunk i.leaves i.proofs expected-root)  %.n
+  $(leaves t.leaves, proofs t.proofs)
 --

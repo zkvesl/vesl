@@ -21,19 +21,31 @@
 ::
 |%
 ::
+::  Local RAG-flavored payload shape.  Wraps a manifest (vs. the
+::  generic leaves/proofs lists in sur/vesl.hoon's settlement-payload)
+::  so rag-logic.settle-note can consume it directly.  Moves to
+::  hull-llm/protocol/sur/rag.hoon in the architectural-split refactor's
+::  Phase 4.
+::
++$  rag-settlement-payload
+  $:  note=[id=@ hull=@ root=@ state=[%pending ~]]
+      mani=manifest
+      expected-root=@
+  ==
+::
 ::  +vesl-entrypoint: universal ABI wrapper
 ::
 ::  Single atom in, settled note out (or crash).
 ::  Three-phase pipeline:
 ::    1. cue: deserialize jammed atom to raw noun
 ::    2. ;;:  strict mold — validate noun structure against
-::           settlement-payload type. Crashes on any mismatch.
+::           rag-settlement-payload type. Crashes on any mismatch.
 ::    3. settle-note: verify manifest + transition state
 ::
 ++  vesl-entrypoint
   |=  payload=@
   ^-  [id=@ hull=@ root=@ state=[%settled ~]]
   =/  raw=*  (cue payload)
-  =/  args=settlement-payload  ;;(settlement-payload raw)
+  =/  args=rag-settlement-payload  ;;(rag-settlement-payload raw)
   (settle-note note.args mani.args expected-root.args)
 --
