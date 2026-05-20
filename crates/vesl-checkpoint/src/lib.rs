@@ -190,7 +190,7 @@ pub async fn resume(
     snapshot: &Snapshot,
     name: &str,
 ) -> Result<NockApp> {
-    resume_with_data_dir(jam_path, snapshot, name, None).await
+    resume_with_data_dir(jam_path, snapshot, name, None, None).await
 }
 
 /// Resume with an explicit `data_dir` for the rebooted app.
@@ -200,15 +200,38 @@ pub async fn resume(
 /// tests) need a way to point the resumed kernel at a fresh dir so successive
 /// runs don't collide. Pass `None` to keep the default-data-dir behavior; pass
 /// `Some(path)` to force a clean target.
+///
+/// `source_app_hoon`: pass `Some(path)` to the new kernel's Hoon source to
+/// verify it hashes to the snapshot's recorded SHA-256. A mismatch is logged
+/// as a warning — composition changes are expected — and `None` skips the
+/// check entirely (AUDIT 2026-05-19 H-20).
 pub async fn resume_with_data_dir(
     jam_path: &Path,
     snapshot: &Snapshot,
     name: &str,
     data_dir: Option<PathBuf>,
+    source_app_hoon: Option<&Path>,
 ) -> Result<NockApp> {
     let kernel_bytes = tokio::fs::read(jam_path)
         .await
         .with_context(|| format!("read kernel jam at {}", jam_path.display()))?;
+
+    // AUDIT 2026-05-19 H-20: if the caller supplies the new kernel's
+    // source, verify it hashes to the snapshot's recorded SHA-256. A
+    // mismatch is a warning, not an error — resuming across a
+    // composition change is a supported, common operation.
+    if let Some(src) = source_app_hoon {
+        let current = sha256_of_file(src)
+            .await
+            .with_context(|| format!("hash {}", src.display()))?;
+        if current != snapshot.source_sha256 {
+            eprintln!(
+                "  warn: resume kernel source SHA-256 {current} differs \
+                 from snapshot {} — resuming across a composition change",
+                snapshot.source_sha256
+            );
+        }
+    }
 
     let mut cli = boot::default_boot_cli(false);
     cli.state_jam = Some(

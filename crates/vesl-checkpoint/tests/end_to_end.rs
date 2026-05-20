@@ -89,6 +89,7 @@ async fn snapshot_then_resume_round_trip() -> Result<()> {
         &snap,
         "vesl-checkpoint-test-resumed",
         Some(resume_dir.path().to_path_buf()),
+        Some(&app_hoon),
     )
     .await?;
     // Resume returning Ok is the contract this test asserts; state
