@@ -6,11 +6,12 @@ on:
   pull_request:
     branches: [main]
 
-# NOTE: vesl-core depends on the nockchain monorepo at ../../nockchain.
-# Full CI requires either:
-#   (a) a checkout step that clones nockchain to the expected relative path, or
-#   (b) publishing nockchain crates to a registry.
-# Until then, this workflow is useful for local `act` runs and as a template.
+# AUDIT 2026-05-19 H-22: the test / audit / clippy jobs check out the
+# sibling nockchain monorepo at NOCK_PIN so vesl-core's nockchain
+# path-deps resolve. NOCK_PIN mirrors jam-determinism.yml and sync.sh —
+# scripts/check-pins.sh gates the match.
+env:
+  NOCK_PIN: fe46f4e3a0ce9532288e9cf3a3fb7e94bf9cba1f
 
 jobs:
   check-pins:
@@ -23,32 +24,63 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout vesl-core
+        uses: actions/checkout@v4
+        with:
+          path: vesl-core
+      - name: Checkout nockchain (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: nockchain/nockchain
+          ref: ${{ env.NOCK_PIN }}
+          path: nockchain
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: vesl-core
       - name: Run tests (vesl-core)
         run: cargo test -p vesl-core
-        working-directory: crates/vesl-core
+        working-directory: vesl-core
 
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout vesl-core
+        uses: actions/checkout@v4
+        with:
+          path: vesl-core
+      - name: Checkout nockchain (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: nockchain/nockchain
+          ref: ${{ env.NOCK_PIN }}
+          path: nockchain
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Audit dependencies (vesl-core)
         run: cargo audit
-        working-directory: crates/vesl-core
+        working-directory: vesl-core
 
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout vesl-core
+        uses: actions/checkout@v4
+        with:
+          path: vesl-core
+      - name: Checkout nockchain (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: nockchain/nockchain
+          ref: ${{ env.NOCK_PIN }}
+          path: nockchain
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: vesl-core
       - name: Clippy (vesl-core)
         run: cargo clippy -p vesl-core -- -D warnings
-        working-directory: crates/vesl-core
+        working-directory: vesl-core
