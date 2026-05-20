@@ -105,6 +105,18 @@
   =/  rd=noun-digest:tip5  (atom-to-digest:tip5 r)
   (digest-to-atom:tip5 (hash-ten-cell:tip5 [ld rd]))
 ::
+::  +max-tip5-atom: largest atom that decodes to an in-field tip5 digest
+::
+::  atom-to-digest:tip5 decomposes an atom base-p into five belts but
+::  leaves the fifth limb as the final quotient — an atom >= p^5 yields
+::  a limb >= p, which crashes the field arithmetic inside hash-ten-cell.
+::  verify-chunk guards attacker-supplied sibling hashes against this
+::  ceiling so an out-of-range proof fails soft instead of panicking.
+::
+++  max-tip5-atom
+  ^~  ^-  @
+  (dec (pow p 5))
+::
 ::  +verify-chunk: prove a chunk is mathematically bound to a Merkle root
 ::
 ::  Strictly tail-recursive (|-) for efficient ZKVM circuit translation.
@@ -128,6 +140,14 @@
   |-
   ?~  proof
     =(cur expected-root)
+  ::  AUDIT 2026-05-20 M-03: a sibling hash >= p^5 decodes to an
+  ::  out-of-field tip5 limb and crashes hash-pair.  Reject as soft
+  ::  %.n so an attacker-crafted proof fails verification rather than
+  ::  panicking the kernel poke (mirrors the depth-cap contract above).
+  ::
+  ?:  (gth hash.i.proof max-tip5-atom)
+    ~>  %slog.[3 'vesl-merkle: sibling hash exceeds tip5 field range']
+    %.n
   =/  nex=@
     ?:  side.i.proof
       (hash-pair hash.i.proof cur)
