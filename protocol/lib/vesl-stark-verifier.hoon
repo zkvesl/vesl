@@ -101,6 +101,14 @@
     ::
     ::  get computation in raw noun form
     ?>  (based-noun p.puzzle)
+    ::  AUDIT 2026-05-20 M-05: the caller-supplied subject and formula
+    ::  flow into augment-challenges and build-tree-data:fock, both of
+    ::  which assert based on their field elements.  Guard [s f] up
+    ::  front so a non-Belt atom fails the verifier via mule instead of
+    ::  crashing inside the proving math.
+    ::
+    ?>  (based-noun s)
+    ?>  (based-noun f)
     ::
     =/  table-names  %-  sort
                     :_  t-order
