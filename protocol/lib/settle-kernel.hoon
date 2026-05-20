@@ -27,10 +27,18 @@
 ::
 =>
 |%
+::  AUDIT 2026-05-19 H-01: state carries epoch-rotation fields so the
+::  `settled` set stays bounded (see settle-graft.hoon). The `%v1` tag
+::  is unchanged but the tuple is wider — a pre-H-01 snapshot does not
+::  resume into this shape; rebuild boots fresh.
+::
 +$  versioned-state
   $:  %v1
+      epoch=@
       registered=(map @ @)
       settled=(set @)
+      settle-count=@
+      prior-settled=(set @)
   ==
 +$  effect  *
 +$  cause
@@ -60,7 +68,7 @@
       ::
       [%settled note-id=@ ~]
         =/  nid  +<.path
-        ``(~(has in settled.state) nid)
+        ``|((~(has in settled.state) nid) (~(has in prior-settled.state) nid))
       ::
       [%root hull=@ ~]
         =/  vid  +<.path
@@ -101,7 +109,7 @@
       =/  args=settlement-payload  p.attempt
       =/  validation
         %-  validate-settlement-args
-        [note.args expected-root.args registered.state settled.state %mutate 'settle:']
+        [note.args expected-root.args registered.state settled.state prior-settled.state %mutate 'settle:']
       ?:  ?=(%.n -.validation)  [~ state]
       =/  ok=?
         %-  verify-payload
@@ -113,8 +121,24 @@
         ~[[%settle-error 'settle: payload verification failed']]
       =/  settled-note=[id=@ hull=@ root=@ state=[%settled ~]]
         [id.note.args hull.note.args root.note.args [%settled ~]]
-      =/  new-settled  (~(put in settled.state) id.note.args)
-      :_  state(settled new-settled)
+      ::  AUDIT 2026-05-19 H-01: rotate the settled set at epoch-cap so
+      ::  kernel state stays bounded; prior-settled keeps a ~2x replay
+      ::  lookback. Mirrors settle-graft.hoon's rotation.
+      ::
+      ?.  (gte settle-count.state epoch-cap)
+        :_  %=  state
+              settled       (~(put in settled.state) id.note.args)
+              settle-count  +(settle-count.state)
+            ==
+        ^-  (list effect)
+        ~[settled-note]
+      ~>  %slog.[3 'settle: settled set rotated (epoch advance)']
+      :_  %=  state
+            epoch          +(epoch.state)
+            prior-settled  settled.state
+            settled        (~(put in *(set @)) id.note.args)
+            settle-count   1
+          ==
       ^-  (list effect)
       ~[settled-note]
       ::
@@ -132,7 +156,7 @@
       =/  args=settlement-payload  p.attempt
       =/  validation
         %-  validate-settlement-args
-        [note.args expected-root.args registered.state settled.state %verify 'settle:']
+        [note.args expected-root.args registered.state settled.state prior-settled.state %verify 'settle:']
       ?:  ?=(%.n -.validation)
         :_  state
         ^-  (list effect)

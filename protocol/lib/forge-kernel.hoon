@@ -20,10 +20,18 @@
 ::
 =>
 |%
+::  AUDIT 2026-05-19 H-01: state carries epoch-rotation fields so the
+::  `settled` set stays bounded (see settle-graft.hoon). The `%v1` tag
+::  is unchanged but the tuple is wider — a pre-H-01 snapshot does not
+::  resume into this shape; rebuild boots fresh.
+::
 +$  versioned-state
   $:  %v1
+      epoch=@
       registered=(map @ @)
       settled=(set @)
+      settle-count=@
+      prior-settled=(set @)
   ==
 +$  effect  *
 +$  forge-payload
@@ -36,6 +44,28 @@
       [%settle payload=@]
       [%verify payload=@]
       [%prove payload=@]
+  ==
+::  AUDIT 2026-05-19 H-01: capacity caps + settled-set rotation.
+::  forge-kernel does not import kernel-arms, so these mirror the
+::  settle-graft.hoon constants locally.
+::
+++  registered-cap  ^~((mul 10.000 1.000))
+++  epoch-cap  ^~((mul 1.000 1.000))
+::  +settle-id: record `id` in the settled set, rotating the epoch
+::  (prior-settled := settled, settled := {id}) once the current epoch
+::  is at capacity so kernel state stays bounded.
+::
+++  settle-id
+  |=  [st=versioned-state id=@]
+  ^-  versioned-state
+  ?.  (gte settle-count.st epoch-cap)
+    st(settled (~(put in settled.st) id), settle-count +(settle-count.st))
+  ~>  %slog.[3 'forge: settled set rotated (epoch advance)']
+  %=  st
+    epoch          +(epoch.st)
+    prior-settled  settled.st
+    settled        (~(put in *(set @)) id)
+    settle-count   1
   ==
 --
 |%
@@ -59,7 +89,7 @@
       ::
       [%settled note-id=@ ~]
         =/  nid  +<.path
-        ``(~(has in settled.state) nid)
+        ``|((~(has in settled.state) nid) (~(has in prior-settled.state) nid))
       ::
       [%root hull=@ ~]
         =/  vid  +<.path
@@ -80,6 +110,11 @@
         %register
       ?:  (~(has by registered.state) hull.u.act)
         ~>  %slog.[3 'forge: hull already registered']
+        [~ state]
+      ::  AUDIT 2026-05-19 H-01: reject once registered is at capacity.
+      ::
+      ?:  (gte ~(wyt by registered.state) registered-cap)
+        ~>  %slog.[3 'forge: registered map at capacity']
         [~ state]
       =/  new-reg  (~(put by registered.state) hull.u.act root.u.act)
       :_  state(registered new-reg)
@@ -118,10 +153,14 @@
       ?.  =(root.note.args expected-root.args)
         ~>  %slog.[3 'forge: note root does not match expected root']
         [~ state]
-      ::  Guard: reject duplicate note IDs (replay protection)
+      ::  Guard: reject duplicate note IDs — replay protection across
+      ::  the current and prior epoch (AUDIT 2026-05-19 H-01)
       ::
       ?:  (~(has in settled.state) id.note.args)
         ~>  %slog.[3 'forge: note already settled (replay rejected)']
+        [~ state]
+      ?:  (~(has in prior-settled.state) id.note.args)
+        ~>  %slog.[3 'forge: note already settled (prior epoch, replay rejected)']
         [~ state]
       ::  Verify all leaves — crash on first failure
       ::
@@ -133,8 +172,7 @@
         $(lvs t.lvs)
       ::  All leaves verified — settle
       ::
-      =/  new-settled  (~(put in settled.state) id.note.args)
-      :_  state(settled new-settled)
+      :_  (settle-id state id.note.args)
       ^-  (list effect)
       ~[[id.note.args hull.note.args root.note.args [%settled ~]]]
       ::
@@ -209,10 +247,14 @@
       ?.  =(root.note.args expected-root.args)
         ~>  %slog.[3 'forge: note root does not match expected root']
         [~ state]
-      ::  Guard: reject duplicate note IDs (replay protection)
+      ::  Guard: reject duplicate note IDs — replay protection across
+      ::  the current and prior epoch (AUDIT 2026-05-19 H-01)
       ::
       ?:  (~(has in settled.state) id.note.args)
         ~>  %slog.[3 'forge: note already settled (replay rejected)']
+        [~ state]
+      ?:  (~(has in prior-settled.state) id.note.args)
+        ~>  %slog.[3 'forge: note already settled (prior epoch, replay rejected)']
         [~ state]
       ::  Verify all leaves — crash on first failure
       ::
@@ -278,8 +320,7 @@
       ::  Proof succeeded — settle and return [result-note proof]
       ::
       =/  the-proof  +.p.proof-attempt
-      =/  new-settled  (~(put in settled.state) id.note.args)
-      :_  state(settled new-settled)
+      :_  (settle-id state id.note.args)
       ^-  (list effect)
       ~[[result-note the-proof]]
     ==

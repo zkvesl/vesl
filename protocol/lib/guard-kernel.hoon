@@ -94,7 +94,7 @@
       =/  args=settlement-payload  p.attempt
       =/  validation
         %-  validate-settlement-args
-        [note.args expected-root.args registered.state ~ %verify 'guard:']
+        [note.args expected-root.args registered.state ~ ~ %verify 'guard:']
       ?:  ?=(%.n -.validation)
         :_  state
         ^-  (list effect)

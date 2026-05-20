@@ -13,6 +13,21 @@
 ::
 /-  *vesl
 |%
+::  AUDIT 2026-05-19 H-01: capacity caps for the production kernels,
+::  mirroring settle-graft.hoon. guard/mint/settle import these via
+::  /+  *kernel-arms; forge-kernel defines its own copies.
+::
+::  +registered-cap: static upper bound on the `registered` map. Large
+::  enough that no legitimate deployment hits it, small enough that a
+::  %register spammer cannot exhaust kernel memory.
+::
+++  registered-cap  ^~((mul 10.000 1.000))
+::  +epoch-cap: rotation threshold for the `settled` set — at this many
+::  settles a kernel rotates (prior-settled := settled, settled := ~)
+::  instead of growing without bound.
+::
+++  epoch-cap  ^~((mul 1.000 1.000))
+::
 ::  +handle-register: insert hull->root mapping, reject re-registration.
 ::    Returns ~ when the hull already has a registered root and slogs
 ::    '<label> hull already registered'.  Returns [~ new-map] on success.
@@ -25,12 +40,18 @@
   ?:  (~(has by registered) hull)
     ~>  %slog.[3 (rap 3 ~[label ' hull already registered'])]
     ~
+  ::  AUDIT 2026-05-19 H-01: reject once the map is at capacity so a
+  ::  %register spammer cannot grow kernel state without bound.
+  ::
+  ?:  (gte ~(wyt by registered) registered-cap)
+    ~>  %slog.[3 (rap 3 ~[label ' registered map at capacity'])]
+    ~
   `(~(put by registered) hull root)
 ::
 ::  +validate-settlement-args: shared settlement-guard chain.
 ::    Chain order: root-registered, expected-root match, note-root
-::    match, replay (mutate mode only — verify mode preserves legacy
-::    behaviour by skipping the replay check).
+::    match, replay against the current and prior epoch (mutate mode
+::    only — verify mode preserves legacy behaviour by skipping replay).
 ::    %mutate slogs '<label> ...' on the failing check.
 ::    %verify is silent; the caller emits [%verified %.n].
 ::    Takes individual fields (note + expected-root) so it does not
@@ -42,6 +63,7 @@
           expected-root=@
           registered=(map @ @)
           settled=(set @)
+          prior-settled=(set @)
           mode=?(%mutate %verify)
           label=@t
       ==
@@ -67,6 +89,9 @@
     [%.y ~]
   ?:  (~(has in settled) id.note)
     ~>  %slog.[3 (rap 3 ~[label ' note already settled (replay rejected)'])]
+    [%.n %replay]
+  ?:  (~(has in prior-settled) id.note)
+    ~>  %slog.[3 (rap 3 ~[label ' note already settled (prior epoch, replay rejected)'])]
     [%.n %replay]
   [%.y ~]
 --
