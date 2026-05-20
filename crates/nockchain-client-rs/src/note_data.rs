@@ -30,7 +30,7 @@
 
 use anyhow::{Context, Result};
 use nockapp::noun::slab::{NockJammer, NounSlab};
-use nockchain_tip5_rs::Tip5Hash;
+use nockchain_tip5_rs::{check_tip5_limbs, Tip5Hash};
 use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
 use nockvm::noun::{IndirectAtom, Noun, NounAllocator, D, T};
 
@@ -165,6 +165,11 @@ pub fn find_hash_entry(data: &NoteData, key: &str) -> Result<Tip5Hash> {
             .map_err(|_| anyhow::anyhow!("tip5 limb {i} exceeds u64 for key '{key}'"))?;
         handle = cell.tail();
     }
+    // AUDIT 2026-05-19 C-04: a digest read off the wire must be in-field
+    // before it reaches Tip5 hashing, or release-build arithmetic diverges
+    // from the Hoon verifier.
+    check_tip5_limbs(&limbs)
+        .map_err(|e| anyhow::anyhow!("tip5 hash for key '{key}' has off-field limb: {e}"))?;
     Ok(limbs)
 }
 

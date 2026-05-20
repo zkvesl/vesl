@@ -4,6 +4,7 @@
 //! Rust-friendly types. The main type is `SpendableUtxo` which carries the
 //! note name, amount, and raw NoteData for app-specific decoding.
 
+use nockchain_tip5_rs::check_tip5_limbs;
 use nockchain_types::tx_engine::common::Hash as ChainHash;
 use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
 
@@ -73,14 +74,25 @@ pub fn extract_note_data(note: &nockapp_grpc::pb::common::v2::Note) -> Option<No
 }
 
 /// Convert a protobuf Hash (5 belts) to a nockchain-types Hash.
-pub fn chain_hash_from_pb(pb: &nockapp_grpc::pb::common::v1::Hash) -> ChainHash {
-    ChainHash::from_limbs(&[
+///
+/// Returns `None` if any belt is not a canonical Goldilocks field element
+/// (`>= PRIME`). nockchain-math range-checks limbs only under
+/// `debug_assert!`, so an off-field limb accepted here would hash
+/// differently in a release build than on the Hoon side — a chainsplit
+/// primitive (audit C-04).
+pub fn chain_hash_from_pb(pb: &nockapp_grpc::pb::common::v1::Hash) -> Option<ChainHash> {
+    let limbs = [
         pb.belt_1.as_ref().map_or(0, |b| b.value),
         pb.belt_2.as_ref().map_or(0, |b| b.value),
         pb.belt_3.as_ref().map_or(0, |b| b.value),
         pb.belt_4.as_ref().map_or(0, |b| b.value),
         pb.belt_5.as_ref().map_or(0, |b| b.value),
-    ])
+    ];
+    if let Err(e) = check_tip5_limbs(&limbs) {
+        eprintln!("warn: protobuf Hash has off-field limb ({e}), skipping note");
+        return None;
+    }
+    Some(ChainHash::from_limbs(&limbs))
 }
 
 /// Extract spendable UTXO info from a protobuf Balance response.
@@ -101,12 +113,12 @@ pub fn extract_spendable_utxos(
             None => continue,
         };
 
-        let first_name = match &pb_name.first {
-            Some(h) => chain_hash_from_pb(h),
+        let first_name = match pb_name.first.as_ref().and_then(chain_hash_from_pb) {
+            Some(h) => h,
             None => continue,
         };
-        let last_name = match &pb_name.last {
-            Some(h) => chain_hash_from_pb(h),
+        let last_name = match pb_name.last.as_ref().and_then(chain_hash_from_pb) {
+            Some(h) => h,
             None => continue,
         };
 

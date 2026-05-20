@@ -50,6 +50,44 @@ pub type Tip5Hash = [u64; 5];
 /// The zero digest (all limbs zero).
 pub const TIP5_ZERO: Tip5Hash = [0u64; 5];
 
+/// A digest limb that is not a canonical Goldilocks field element.
+///
+/// `nockchain-math` range-checks limbs only under `debug_assert!`, so a
+/// release build hashes an off-field limb unreduced and reaches a digest
+/// that disagrees with the Hoon verifier — a chainsplit primitive. Every
+/// `Tip5Hash` materialized from external bytes must be screened with
+/// [`check_tip5_limbs`] first (audit C-04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldRangeError {
+    /// The offending limb (`>= PRIME`).
+    pub limb: u64,
+}
+
+impl std::fmt::Display for FieldRangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "digest limb {} is not below the Goldilocks prime",
+            self.limb
+        )
+    }
+}
+
+impl std::error::Error for FieldRangeError {}
+
+/// Reject a digest whose limbs are not canonical Goldilocks field
+/// elements (`>= PRIME`). MUST be called on every `Tip5Hash` built from
+/// external bytes — wire reads, protobuf, `serde` deserialization —
+/// before it is fed to any hash or comparison (audit C-04).
+pub fn check_tip5_limbs(hash: &Tip5Hash) -> Result<(), FieldRangeError> {
+    for &limb in hash {
+        if limb >= PRIME {
+            return Err(FieldRangeError { limb });
+        }
+    }
+    Ok(())
+}
+
 /// A node in a Merkle inclusion proof.
 ///
 /// Matches Hoon `+$proof-node [hash=@ side=?]`.
@@ -198,6 +236,21 @@ pub fn verify_proof(leaf_data: &[u8], proof: &[ProofNode], expected_root: &Tip5H
             "verify_proof: proof exceeds 64-node cap (matches Hoon's verify-chunk), rejecting"
         );
         return false;
+    }
+
+    // AUDIT 2026-05-19 C-04: reject off-field limbs in caller-supplied
+    // digests. nockchain-math range-checks only under debug_assert!, so a
+    // release build would otherwise hash unreduced limbs and reach a
+    // different digest than the Hoon verifier.
+    if let Err(e) = check_tip5_limbs(expected_root) {
+        tracing::warn!(limb = e.limb, "verify_proof: expected_root limb off-field, rejecting");
+        return false;
+    }
+    for node in proof {
+        if let Err(e) = check_tip5_limbs(&node.hash) {
+            tracing::warn!(limb = e.limb, "verify_proof: proof node limb off-field, rejecting");
+            return false;
+        }
     }
 
     let mut cur = hash_leaf(leaf_data);
@@ -491,5 +544,28 @@ mod tests {
         let root1 = MerkleTree::build(&leaves).root();
         let root2 = MerkleTree::build(&leaves).root();
         assert_eq!(root1, root2, "root must be deterministic across builds");
+    }
+
+    // -- Field-range validation (C-04) ------------------------------------
+
+    #[test]
+    fn off_field_limbs_rejected() {
+        // PRIME is the smallest off-field value.
+        let off_field: Tip5Hash = [PRIME, 0, 0, 0, 0];
+        assert!(check_tip5_limbs(&off_field).is_err());
+        assert!(check_tip5_limbs(&[0, 0, 0, 0, u64::MAX]).is_err());
+        assert!(check_tip5_limbs(&[PRIME - 1, 0, 0, 0, 0]).is_ok());
+
+        // verify_proof must reject an off-field root or proof node rather
+        // than hashing it — a release build would otherwise compute a
+        // wrong-but-deterministic digest (debug_assert! is a no-op there).
+        let leaves: Vec<&[u8]> = vec![b"a", b"b"];
+        let tree = MerkleTree::build(&leaves);
+        let proof = tree.proof(0);
+        assert!(!verify_proof(b"a", &proof, &off_field));
+
+        let mut bad_proof = proof.clone();
+        bad_proof[0].hash = off_field;
+        assert!(!verify_proof(b"a", &bad_proof, &tree.root()));
     }
 }
