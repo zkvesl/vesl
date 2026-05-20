@@ -18,6 +18,7 @@ vesl-core    = { path = "../../crates/vesl-core" }
 nock-noun-rs = { path = "../../crates/nock-noun-rs" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 vesl-test       = { git = "https://github.com/zkvesl/vesl-nockup" }

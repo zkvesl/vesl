@@ -19,3 +19,14 @@ pub fn verify_kernel() {
          between build-time hash and binary link, refusing to boot",
     );
 }
+
+/// Verified accessor for the embedded kernel JAM.
+///
+/// Runs [`verify_kernel`] once, on first call, and panics on a sha256
+/// mismatch. Prefer this over the raw [`KERNEL`] static — `KERNEL` is the
+/// unverified bytes (AUDIT 2026-05-19 C-01).
+pub fn kernel() -> &'static [u8] {
+    static CHECKED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    CHECKED.get_or_init(verify_kernel);
+    KERNEL
+}

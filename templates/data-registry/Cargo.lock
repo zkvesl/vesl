@@ -843,6 +843,7 @@ dependencies = [
  "nockapp",
  "nockvm",
  "nockvm_macros",
+ "sha2",
  "tokio",
 ]
 

@@ -21,6 +21,7 @@ nock-noun-rs = { path = "../../crates/nock-noun-rs" }
 nockchain-tip5-rs = { path = "../../crates/nockchain-tip5-rs" }
 
 tokio = { version = "1.32", features = ["rt-multi-thread", "macros"] }
+sha2 = "0.10"
 
 # vesl-signing (pulled transitively via vesl-core) declares
 # `ibig = "0.3"` from crates.io. vesl-core's signing path uses the

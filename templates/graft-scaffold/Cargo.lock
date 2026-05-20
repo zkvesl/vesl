@@ -3733,6 +3733,7 @@ dependencies = [
  "nockchain-tip5-rs",
  "nockvm",
  "nockvm_macros",
+ "sha2",
  "tokio",
  "vesl-core",
  "zkvm-jetpack",
