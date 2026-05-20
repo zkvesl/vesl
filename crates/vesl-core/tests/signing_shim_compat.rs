@@ -24,8 +24,8 @@ fn nonzero_key() -> [Belt; 8] {
 #[test]
 fn round_trip_sign_then_derive_consistent() {
     let sk = nonzero_key();
-    let pk1 = derive_pubkey(&sk);
-    let pk2 = derive_pubkey(&sk);
+    let pk1 = derive_pubkey(&sk).expect("test key derives");
+    let pk2 = derive_pubkey(&sk).expect("test key derives");
     // Determinism: same key → same pubkey. (Belt-array fields aren't Eq;
     // compare via the inner CheetahPoint coordinates.)
     assert_eq!(pk1.0.x.0, pk2.0.x.0);
@@ -74,8 +74,8 @@ fn pubkey_hash_distinguishes_keys() {
     let sk1 = nonzero_key();
     let mut sk2 = nonzero_key();
     sk2[2] = Belt(99);
-    let pkh1 = pubkey_hash(&derive_pubkey(&sk1));
-    let pkh2 = pubkey_hash(&derive_pubkey(&sk2));
+    let pkh1 = pubkey_hash(&derive_pubkey(&sk1).expect("test key derives"));
+    let pkh2 = pubkey_hash(&derive_pubkey(&sk2).expect("test key derives"));
     assert_ne!(pkh1.0, pkh2.0);
 }
 
@@ -120,7 +120,7 @@ fn key_from_seed_phrase_canonical_round_trips_through_sign() {
     let sk = key_from_seed_phrase(CANONICAL_MNEMONIC).unwrap();
     let m = [Belt(1), Belt(2), Belt(3), Belt(4), Belt(5)];
     let sig = sign(&sk, &m).expect("signing should succeed");
-    let pk = derive_pubkey(&sk);
+    let pk = derive_pubkey(&sk).expect("test key derives");
     // Sanity: signature components are non-zero and pubkey is on-curve
     // (vesl-signing rejects the off-curve case in derive_pubkey).
     assert!(!pk.0.inf);

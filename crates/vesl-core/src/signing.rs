@@ -117,11 +117,14 @@ impl From<WalletError> for SigningError {
 /// Derive the Schnorr public key from a secret key.
 ///
 /// `sk` is 8 × 32-bit Belt chunks (little-endian, matching Hoon's t8).
-pub fn derive_pubkey(sk: &[Belt; 8]) -> SchnorrPubkey {
-    let belts = nock_belts8_to_vesl(sk);
-    let key = SchnorrPrivateKey::from_belts(&belts)
-        .expect("vesl-core key derivation invariant: caller verified scalar in (0, G_ORDER)");
-    SchnorrPubkey(vesl_point_to_nock(&key.public_key()))
+///
+/// AUDIT 2026-05-19 H-04: returns `Err` instead of panicking when a
+/// chunk is out of 32-bit range or the assembled scalar lands outside
+/// `(0, G_ORDER)` — attacker-influenced belts cannot crash the caller.
+pub fn derive_pubkey(sk: &[Belt; 8]) -> Result<SchnorrPubkey, SigningError> {
+    let belts = nock_belts8_to_vesl(sk)?;
+    let key = SchnorrPrivateKey::from_belts(&belts)?;
+    Ok(SchnorrPubkey(vesl_point_to_nock(&key.public_key())))
 }
 
 /// Compute the PKH (public-key hash) from a public key.
@@ -237,7 +240,7 @@ pub fn schnorr_message_digest_for_data(data: &[u8]) -> [Belt; 5] {
 /// nonce / counter in the message body before digesting. The signing
 /// layer does not add randomness on behalf of the caller.
 pub fn sign(sk: &[Belt; 8], message: &[Belt; 5]) -> Result<SchnorrSignature, SigningError> {
-    let belts = nock_belts8_to_vesl(sk);
+    let belts = nock_belts8_to_vesl(sk)?;
     let key = SchnorrPrivateKey::from_belts(&belts)?;
     let m = nock_belts5_to_vesl(message);
     let (chal, sig) = schnorr_sign(&key, &m)?;
@@ -278,10 +281,18 @@ pub fn key_from_seed_phrase(phrase: &str) -> Result<[Belt; 8], SigningError> {
 // ---------------------------------------------------------------------------
 
 /// Convert nockchain-math `[Belt; 8]` into vesl-signing's `[Belt; 8]`.
-/// Both Belt structs wrap `u64` in a public tuple field; the conversion
-/// is a memcpy through `.0`.
-fn nock_belts8_to_vesl(belts: &[Belt; 8]) -> [VeslBelt; 8] {
-    std::array::from_fn(|i| VeslBelt(belts[i].0))
+/// Both Belt structs wrap `u64` in a public tuple field.
+///
+/// AUDIT 2026-05-19 H-04: a well-formed t8 secret key holds eight 32-bit
+/// chunks. Reject an out-of-range limb here, at the vesl-core boundary,
+/// rather than letting it panic an `.expect()` deeper in the shim.
+fn nock_belts8_to_vesl(belts: &[Belt; 8]) -> Result<[VeslBelt; 8], SigningError> {
+    for b in belts {
+        if b.0 > u32::MAX as u64 {
+            return Err(SigningError::InvalidSecretKey);
+        }
+    }
+    Ok(std::array::from_fn(|i| VeslBelt(belts[i].0)))
 }
 
 /// Same as [`nock_belts8_to_vesl`] for the 5-Belt message digest shape.
@@ -375,7 +386,7 @@ mod tests {
     fn derive_pubkey_from_nonzero_key() {
         let mut sk = [Belt(0); 8];
         sk[0] = Belt(42);
-        let pk = derive_pubkey(&sk);
+        let pk = derive_pubkey(&sk).expect("test key derives");
         assert!(!pk.0.inf);
         assert_ne!(pk.0.x, F6_ZERO);
     }
@@ -390,7 +401,7 @@ mod tests {
 
         let sig = sign(&sk, &message).expect("signing should succeed");
 
-        let pubkey = derive_pubkey(&sk);
+        let pubkey = derive_pubkey(&sk).expect("test key derives");
         let chal_big = belts8_to_ubig(&sig.chal);
         let sig_big = belts8_to_ubig(&sig.sig);
 
@@ -438,7 +449,7 @@ mod tests {
     fn pubkey_hash_produces_valid_hash() {
         let mut sk = [Belt(0); 8];
         sk[0] = Belt(999);
-        let pk = derive_pubkey(&sk);
+        let pk = derive_pubkey(&sk).expect("test key derives");
         let pkh = pubkey_hash(&pk);
         assert!(pkh.0.iter().any(|b| b.0 != 0));
     }
@@ -497,7 +508,7 @@ mod tests {
         // chunks should reproduce pk.x and the next 6 chunks pk.y.
         let mut sk = [Belt(0); 8];
         sk[0] = Belt(31_415);
-        let pk = derive_pubkey(&sk);
+        let pk = derive_pubkey(&sk).expect("test key derives");
         let bytes = pubkey_canonical_bytes(&pk);
         assert_eq!(bytes.len(), 97);
         assert_eq!(bytes[96], 0x01, "LE marker belongs at byte 96");
@@ -554,7 +565,7 @@ mod tests {
         let mut sk = [Belt(0); 8];
         sk[0] = Belt(11_111);
         sk[1] = Belt(22_222);
-        let pubkey = derive_pubkey(&sk);
+        let pubkey = derive_pubkey(&sk).expect("test key derives");
         let digest = schnorr_message_digest_for_data(
             b"attest: 32-byte hash fingerprint",
         );
@@ -581,7 +592,7 @@ mod tests {
         // Verify the nock <-> vesl CheetahPoint translation is exact.
         let mut sk = [Belt(0); 8];
         sk[0] = Belt(54321);
-        let nock_pk = derive_pubkey(&sk);
+        let nock_pk = derive_pubkey(&sk).expect("test key derives");
         let vesl_pk = nock_point_to_vesl(&nock_pk.0);
         let back = vesl_point_to_nock(&vesl_pk);
         assert_eq!(back.x.0, nock_pk.0.x.0);

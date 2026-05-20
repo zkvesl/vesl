@@ -175,7 +175,8 @@ pub fn build_witness(
 ) -> Result<nockchain_types::tx_engine::v1::tx::Witness> {
     use nockchain_types::tx_engine::v1::tx::*;
 
-    let pubkey = crate::signing::derive_pubkey(signing_key);
+    let pubkey = crate::signing::derive_pubkey(signing_key)
+        .map_err(|e| anyhow::anyhow!("pubkey derivation failed: {e}"))?;
     let pkh = crate::signing::pubkey_hash(&pubkey);
 
     let input_condition = if is_coinbase {

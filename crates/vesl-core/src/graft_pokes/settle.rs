@@ -566,7 +566,7 @@ mod tests {
         use nockchain_math::belt::Belt;
         let mut sk = [Belt(0); 8];
         sk[0] = Belt(0xabad_f00d);
-        let pk = crate::signing::derive_pubkey(&sk);
+        let pk = crate::signing::derive_pubkey(&sk).expect("fixture key derives");
         (sk, pk)
     }
 
