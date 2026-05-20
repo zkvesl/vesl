@@ -124,12 +124,30 @@ pub fn u64_to_noun(slab: &mut NounSlab<NockJammer>, val: u64) -> Noun {
 // Decoding — jammed NoteDataEntry to Rust values
 // ---------------------------------------------------------------------------
 
-/// Find a NoteDataEntry by key and decode its jammed value as a u64.
-pub fn find_u64_entry(data: &NoteData, key: &str) -> Result<u64> {
-    let entry = find_entry(data, key)?;
+/// Upper bound on a `NoteDataEntry` blob before `cue` (AUDIT 2026-05-19
+/// H-10). `cue` grows its slab by doubling; an attacker-crafted blob can
+/// otherwise drive allocator overhead well past the input byte length.
+const MAX_BLOB_LEN: usize = 1 << 20;
+
+/// Cue a `NoteDataEntry` blob into a fresh slab, rejecting an oversized
+/// blob before the allocation-amplifying `cue` runs.
+fn cue_entry_blob(entry: &NoteDataEntry) -> Result<NounSlab<NockJammer>> {
+    anyhow::ensure!(
+        entry.blob.len() <= MAX_BLOB_LEN,
+        "NoteDataEntry blob for key '{}' is {} bytes (cap {MAX_BLOB_LEN})",
+        entry.key,
+        entry.blob.len(),
+    );
     let mut slab: NounSlab<NockJammer> = NounSlab::new();
     slab.cue_into(entry.blob.clone())
         .context("failed to cue NoteDataEntry blob")?;
+    Ok(slab)
+}
+
+/// Find a NoteDataEntry by key and decode its jammed value as a u64.
+pub fn find_u64_entry(data: &NoteData, key: &str) -> Result<u64> {
+    let entry = find_entry(data, key)?;
+    let slab = cue_entry_blob(entry)?;
     let noun = slab_root(&slab);
     let space = slab.noun_space();
     let atom = noun
@@ -146,9 +164,7 @@ pub fn find_u64_entry(data: &NoteData, key: &str) -> Result<u64> {
 /// reconstructs the `[u64; 5]` digest.
 pub fn find_hash_entry(data: &NoteData, key: &str) -> Result<Tip5Hash> {
     let entry = find_entry(data, key)?;
-    let mut slab: NounSlab<NockJammer> = NounSlab::new();
-    slab.cue_into(entry.blob.clone())
-        .context("failed to cue NoteDataEntry blob")?;
+    let slab = cue_entry_blob(entry)?;
     let noun = slab_root(&slab);
     let space = slab.noun_space();
     let mut handle = noun.in_space(&space);
@@ -179,9 +195,7 @@ pub fn find_hash_entry(data: &NoteData, key: &str) -> Result<Tip5Hash> {
 /// and returns the original byte content. The zero atom decodes to an empty vec.
 pub fn find_opaque_bytes_entry(data: &NoteData, key: &str) -> Result<Vec<u8>> {
     let entry = find_entry(data, key)?;
-    let mut slab: NounSlab<NockJammer> = NounSlab::new();
-    slab.cue_into(entry.blob.clone())
-        .context("failed to cue NoteDataEntry blob")?;
+    let slab = cue_entry_blob(entry)?;
     let noun = slab_root(&slab);
     let space = slab.noun_space();
     let atom = noun
