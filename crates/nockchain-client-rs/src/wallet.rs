@@ -233,7 +233,9 @@ pub fn build_sign_hash_poke(hash_b58: &str, key_index: u64, hardened: bool) -> V
     let mut slab: NounSlab<NockJammer> = NounSlab::new();
     let tag = make_tas(&mut slab, "sign-hash").as_noun();
     let hash = make_tas(&mut slab, hash_b58).as_noun();
-    let index = D(key_index);
+    // AUDIT 2026-05-19 H-09: u64_to_noun picks D() vs indirect atom by
+    // size; a bare D() panics the process on key_index >= 2^63.
+    let index = crate::note_data::u64_to_noun(&mut slab, key_index);
     let hard: Noun = if hardened { D(0) } else { D(1) };
     let cmd = T(&mut slab, &[tag, hash, index, hard]);
     slab.set_root(cmd);
@@ -274,12 +276,14 @@ pub fn build_create_tx_poke(
     let names = T(&mut slab, &[name_pair, D(0)]);
 
     // order: list of [amount address] pairs
-    let amt = D(amount_nicks);
+    // AUDIT 2026-05-19 H-09: u64_to_noun picks D() vs indirect atom by
+    // size; a bare D() panics the process on a tx amount / fee >= 2^63.
+    let amt = crate::note_data::u64_to_noun(&mut slab, amount_nicks);
     let addr = make_tas(&mut slab, recipient_address).as_noun();
     let recipient_pair = T(&mut slab, &[amt, addr]);
     let order = T(&mut slab, &[recipient_pair, D(0)]);
 
-    let fee = D(fee_nicks);
+    let fee = crate::note_data::u64_to_noun(&mut slab, fee_nicks);
     let allow_low_fee = D(1); // %.n
     let refund = D(0); // ~
     let key_pair = T(&mut slab, &[D(0), D(1)]); // [0 %.n]
