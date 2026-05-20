@@ -32,6 +32,10 @@ use tonic::transport::Channel;
 #[derive(Debug, Clone)]
 pub struct ChainConfig {
     /// gRPC endpoint URL (e.g., `http://localhost:9090`).
+    ///
+    /// Security-critical: carries balance queries and tx submission. A
+    /// non-loopback host must use `https://` — `connect` rejects
+    /// plaintext to a remote host (AUDIT 2026-05-19 H-11).
     pub endpoint: String,
     /// How often to poll `transaction_accepted` in `wait_for_acceptance`.
     pub poll_interval: Duration,
@@ -83,6 +87,7 @@ pub struct ChainClient {
 impl ChainClient {
     /// Connect to a Nockchain node's public gRPC endpoint.
     pub async fn connect(config: ChainConfig) -> Result<Self> {
+        crate::reject_insecure_endpoint(&config.endpoint)?;
         let client =
             nockapp_grpc::services::public_nockchain::PublicNockchainGrpcClient::connect(
                 &config.endpoint,

@@ -38,6 +38,10 @@ use nockvm::noun::{Noun, D, T};
 #[derive(Debug, Clone)]
 pub struct WalletConfig {
     /// Private gRPC endpoint of the wallet instance.
+    ///
+    /// Security-critical: carries signing requests. A non-loopback host
+    /// must use `https://` — `connect` rejects plaintext to a remote
+    /// host (AUDIT 2026-05-19 H-11).
     pub endpoint: String,
 }
 
@@ -90,6 +94,7 @@ pub struct WalletClient {
 impl WalletClient {
     /// Connect to a wallet's private gRPC endpoint.
     pub async fn connect(config: WalletConfig) -> Result<Self> {
+        crate::reject_insecure_endpoint(&config.endpoint)?;
         let client =
             nockapp_grpc::private_nockapp::PrivateNockAppGrpcClient::connect(&config.endpoint)
                 .await

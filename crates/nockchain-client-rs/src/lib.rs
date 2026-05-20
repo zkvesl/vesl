@@ -57,3 +57,68 @@ pub use nockchain_tip5_rs::Tip5Hash;
 pub use nockchain_types::tx_engine::common::Hash as ChainHash;
 pub use nockchain_types::tx_engine::v1::note::{NoteData, NoteDataEntry};
 pub use nockchain_types::tx_engine::v1::RawTx;
+
+// ---------------------------------------------------------------------------
+// Endpoint security (AUDIT 2026-05-19 H-11)
+// ---------------------------------------------------------------------------
+
+/// Reject a plaintext (`http://`) endpoint that points at a non-loopback
+/// host. `ChainClient` / `WalletClient` carry balance queries, transaction
+/// submission, and signing requests — over plaintext to a remote host
+/// those are exposed to passive MITM. `https://` endpoints (TLS via tonic's
+/// webpki roots) and loopback endpoints pass.
+pub(crate) fn reject_insecure_endpoint(endpoint: &str) -> anyhow::Result<()> {
+    let (scheme, rest) = endpoint
+        .split_once("://")
+        .ok_or_else(|| anyhow::anyhow!("endpoint '{endpoint}' is missing a scheme"))?;
+    if scheme.eq_ignore_ascii_case("https") {
+        return Ok(());
+    }
+    let host = if let Some(v6) = rest.strip_prefix('[') {
+        v6.split(']').next().unwrap_or(v6)
+    } else {
+        rest.split(['/', ':']).next().unwrap_or(rest)
+    };
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
+    if loopback {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "refusing to connect to non-loopback host '{host}' over plaintext \
+             '{scheme}://' — use an 'https://' endpoint (AUDIT 2026-05-19 H-11)"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::reject_insecure_endpoint;
+
+    #[test]
+    fn loopback_plaintext_allowed() {
+        assert!(reject_insecure_endpoint("http://localhost:5555").is_ok());
+        assert!(reject_insecure_endpoint("http://127.0.0.1:9090").is_ok());
+        assert!(reject_insecure_endpoint("http://[::1]:9090").is_ok());
+    }
+
+    #[test]
+    fn https_allowed_anywhere() {
+        assert!(reject_insecure_endpoint("https://node.example.com").is_ok());
+        assert!(reject_insecure_endpoint("https://10.0.0.5:9090").is_ok());
+    }
+
+    #[test]
+    fn remote_plaintext_rejected() {
+        assert!(reject_insecure_endpoint("http://node.example.com:9090").is_err());
+        assert!(reject_insecure_endpoint("http://10.0.0.5:9090").is_err());
+    }
+
+    #[test]
+    fn missing_scheme_rejected() {
+        assert!(reject_insecure_endpoint("localhost:5555").is_err());
+    }
+}
