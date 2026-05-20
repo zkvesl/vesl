@@ -1,5 +1,15 @@
 # Vesl Security Audit Report — 2026-05-19 Beta Review
 
+> **Status update — 2026-05-20.** All nine Critical findings are remediated in code.
+> **C-01–C-07 and C-09** are fixed and verified on `dev` (see the per-finding banners in
+> §2). **C-08**'s remediation — the `vesl-core-sync.yml` workflow — is committed on `dev`
+> and deploys to `origin` with the pending batch push; confirm post-push with
+> `git show origin/main:.github/workflows/vesl-core-sync.yml`.
+>
+> This banner and the §2 per-finding banners supersede the "NOT READY FOR BETA" verdict in
+> §1 and items 1–9 of §9 with respect to the Critical findings. The **22 High findings
+> remain open** — remediation is tracked separately.
+
 **Scope.** Adversarial whitebox audit of the three repositories that ship together for the Vesl beta release:
 
 - `vesl-core` @ `e509c86` (branch `dev`) — Hoon protocol, Rust Vessel, kernel JAMs.
@@ -71,6 +81,8 @@ Beyond the criticals, the report catalogs 22 High, 31 Medium, and 28 Low/Informa
 
 ### C-01 — Kernel-integrity check is opt-in and never invoked; templates load `out.jam` from disk with zero verification
 
+> **RESOLVED — 2026-05-20 (`37ca1da`).** Kernels expose an `OnceLock`-guarded `kernel()` that runs `verify_kernel()` once; templates gained an env-gated (`VESL_KERNEL_SHA256`) sha256 check on `out.jam`.
+
 **Severity:** Critical (kernel-substitution attack — silent integrity bypass)
 **Repo:** vesl-core (kernel crates) + vesl-nockup (templates)
 **Files:**
@@ -116,6 +128,8 @@ This is the single highest-leverage fix in the audit. Estimated effort: half a d
 
 ### C-02 — STARK verifier `test-mode` parameter still flippable at production boundary (H-01 unfixed)
 
+> **RESOLVED — 2026-05-20 (`15f979b`; JAMs `ecf33b9`).** `?>  =(test-mode %.n)` hard-asserts added at the `+verify` and `+verify-settlement` outer gates.
+
 **Severity:** Critical (soundness bypass on one boolean parameter)
 **Repo:** vesl-core
 **Files:** `protocol/lib/vesl-stark-verifier.hoon:16,46,73,510`
@@ -155,6 +169,8 @@ Then regenerate `assets/{guard,mint,settle}.jam` and `assets/CHECKSUMS.sha256` p
 ---
 
 ### C-03 — `forge-kernel.hoon` and `vesl-kernel.hoon` `%prove` treat `prove-result %| err` as success; permanently settle on prover error
+
+> **RESOLVED — 2026-05-20 (`77ce58a`; JAMs `ecf33b9`).** `%prove` now sieves the inner `each` discriminator (`?=(%& -.p.proof-attempt)`) in `forge-kernel.hoon`; hull-llm `vesl-kernel.hoon` mirrors it.
 
 **Severity:** Critical (fake settlement via prover error path)
 **Repo:** vesl-core (forge-kernel) + hull-llm (vesl-kernel, post-cleanup)
@@ -213,6 +229,8 @@ Mirror in `hull-llm/protocol/lib/vesl-kernel.hoon` `handle-prove`, substituting 
 ---
 
 ### C-04 — `Tip5Hash` limbs are unconstrained at the Rust API surface; release builds bypass field-membership checks → chainsplit primitive
+
+> **RESOLVED — 2026-05-20 (`8486bd7`).** `check_tip5_limbs()` range-checks every limb against the Goldilocks prime at the wire boundary (`verify_proof`, `find_hash_entry`).
 
 **Severity:** Critical (cross-VM divergence — Rust and Hoon disagree on identical bytes)
 **Repo:** vesl-core
@@ -276,6 +294,8 @@ In debug builds the assert fires and the issue is loud. In release (the only bui
 
 ### C-05 — CAIP-122 SIWN message body is field-injectable via unsanitized `params.uri` / `params.nonce` / etc.
 
+> **RESOLVED — 2026-05-20 (vesl-wallet `43d8b8d`).** `validate_field()` rejects control chars before `format!`; `parse_caip122_message` rejects `\r`, asserts the blank line empty, asserts the line iterator exhausted.
+
 **Severity:** Critical (single victim signature mints attacker-impersonation token)
 **Repo:** vesl-wallet
 **Files:**
@@ -305,6 +325,8 @@ The signature covers the full body, so it verifies. `params.address` (line 2 of 
 
 ### C-06 — SIWN replay cache key is `(nonce)` only; no binding to `chain_id`, `address`, `uri`, or message digest
 
+> **RESOLVED — 2026-05-20 (vesl-wallet `43d8b8d`).** The SIWN replay-cache key is now the full Tip5 message digest — binding domain, chain_id, address, uri, and nonce.
+
 **Severity:** Critical (cross-chain / cross-resource replay)
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/caip122.rs:267`
@@ -332,6 +354,8 @@ Either format works; the point is the cache key includes everything the signatur
 ---
 
 ### C-07 — `verify` does not validate `chain_id`, `uri`, or `version` against expected deployment values
+
+> **RESOLVED — 2026-05-20 (vesl-wallet `43d8b8d`).** `verify` takes a `SiwnVerifyContext` and enforces domain/chain_id/uri/version with explicit `ChainIdMismatch` / `UriMismatch` / `VersionMismatch` errors.
 
 **Severity:** Critical (cross-chain replay; spec-required defense missing)
 **Repo:** vesl-wallet
@@ -362,6 +386,8 @@ Reject mismatches with explicit `ChainIdMismatch` / `UriMismatch` / `VersionMism
 
 ### C-08 — `vesl-core-sync.yml` workflow is not deployed on `origin/dev` or `origin/main` — supply-chain mirror gate is paper-only
 
+> **COMMITTED — DEPLOY-PENDING — 2026-05-20.** The `vesl-core-sync.yml` workflow is committed on `dev`; it goes live on `origin` with the pending batch push. Confirm post-push: `git show origin/main:.github/workflows/vesl-core-sync.yml`.
+
 **Severity:** Critical (CI gate that prevents downstream-template drift is not active)
 **Repo:** vesl-core
 **File:** `.github/workflows/vesl-core-sync.yml`
@@ -380,6 +406,8 @@ Per CLAUDE.md §7 and `AUDIT_FOLLOWUP_INDEX.md`, this workflow is the gate that 
 ---
 
 ### C-09 — Even if deployed, `vesl-core-sync.yml`'s diff command is structurally broken (always fails); CI pins disagree with sync.sh, one is non-existent
+
+> **RESOLVED — 2026-05-20 (`a439d53`).** Workflow rewritten to one-way `sync.sh --verify`; `NOCK_PIN` / `VESL_CORE_PIN` / `VESL_WALLET_PIN` aligned across `ci.yml` and `sync.sh`; the non-existent `VESL_WALLET_PIN` replaced with a real SHA.
 
 **Severity:** Critical (CI gate, if deployed, would either always fail or check the wrong SHAs)
 **Repo:** vesl-core + vesl-nockup
