@@ -9,7 +9,7 @@
 //! chain submission. Kernel interaction (NockApp pokes for sig-hash
 //! and tx-id) lives in `tx_builder`.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use anyhow::Result;
 
@@ -20,6 +20,13 @@ use nockchain_tip5_rs::Tip5Hash;
 use crate::guard::Guard;
 use crate::types::{CommitmentVerifier, GraftPayload, Note};
 
+/// Upper bound on the pre-flight `settled_ids` cache (AUDIT 2026-05-19
+/// H-07). The kernel's `settled` set is the authoritative replay
+/// defense; this SDK-side cache is a pre-flight diagnostic, so evicting
+/// the oldest entry past the cap is safe — a missed pre-flight hit just
+/// defers the duplicate rejection to the kernel.
+const SETTLED_IDS_CAP: usize = 1_000_000;
+
 /// Generic settlement orchestrator parameterized by a domain `CommitmentVerifier`.
 ///
 /// Vesl-core ships only the trait; concrete verifier implementations live in
@@ -29,6 +36,8 @@ pub struct Settle<V: CommitmentVerifier> {
     guard: Guard,
     verifier: V,
     settled_ids: HashSet<u64>,
+    /// Insertion order for `settled_ids`, enabling FIFO eviction at the cap.
+    settled_order: VecDeque<u64>,
 }
 
 impl<V: CommitmentVerifier> Settle<V> {
@@ -38,6 +47,7 @@ impl<V: CommitmentVerifier> Settle<V> {
             guard: Guard::new(),
             verifier,
             settled_ids: HashSet::new(),
+            settled_order: VecDeque::new(),
         }
     }
 
@@ -92,7 +102,17 @@ impl<V: CommitmentVerifier> Settle<V> {
         // Poke is built but not dispatched — kernel interaction needs a
         // NockApp handle, which the hull owns. Use `poke_bytes()` to get
         // the serialized poke for hull-side dispatch.
-        self.settled_ids.insert(payload.note.id);
+        // AUDIT 2026-05-19 H-07: bound the pre-flight cache — evict the
+        // oldest id once at capacity so a long-running hull does not
+        // leak unbounded replay state.
+        if self.settled_ids.len() >= SETTLED_IDS_CAP {
+            if let Some(old) = self.settled_order.pop_front() {
+                self.settled_ids.remove(&old);
+            }
+        }
+        if self.settled_ids.insert(payload.note.id) {
+            self.settled_order.push_back(payload.note.id);
+        }
         Ok(Note {
             id: payload.note.id,
             hull: payload.note.hull,
