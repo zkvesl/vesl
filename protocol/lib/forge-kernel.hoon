@@ -162,14 +162,21 @@
       ?:  (~(has in prior-settled.state) id.note.args)
         ~>  %slog.[3 'forge: note already settled (prior epoch, replay rejected)']
         [~ state]
-      ::  Verify all leaves — crash on first failure
+      ::  Verify all leaves — emit a typed error on failure (AUDIT
+      ::  2026-05-19 H-03; a ?> here crashed the poke instead, so a
+      ::  >64-depth proof was indistinguishable from a kernel bug).
       ::
-      ?>
+      =/  leaves-ok=?
         =/  lvs  leaves.args
         |-
         ?~  lvs  %.y
         ?.  (verify-chunk dat.i.lvs proof.i.lvs expected-root.args)  %.n
         $(lvs t.lvs)
+      ?.  leaves-ok
+        ~>  %slog.[3 'forge: leaf verify failed']
+        :_  state
+        ^-  (list effect)
+        ~[[%settle-error 'forge: leaf verify failed']]
       ::  All leaves verified — settle
       ::
       :_  (settle-id state id.note.args)
@@ -256,14 +263,21 @@
       ?:  (~(has in prior-settled.state) id.note.args)
         ~>  %slog.[3 'forge: note already settled (prior epoch, replay rejected)']
         [~ state]
-      ::  Verify all leaves — crash on first failure
+      ::  Verify all leaves — emit a typed error on failure (AUDIT
+      ::  2026-05-19 H-03; a ?> here crashed the poke instead, so a
+      ::  >64-depth proof was indistinguishable from a kernel bug).
       ::
-      ?>
+      =/  leaves-ok=?
         =/  lvs  leaves.args
         |-
         ?~  lvs  %.y
         ?.  (verify-chunk dat.i.lvs proof.i.lvs expected-root.args)  %.n
         $(lvs t.lvs)
+      ?.  leaves-ok
+        ~>  %slog.[3 'forge: leaf verify failed']
+        :_  state
+        ^-  (list effect)
+        ~[[%prove-error 'forge: leaf verify failed']]
       ::  Belt-decompose all leaf data
       ::
       =/  all-belts=(list @)
