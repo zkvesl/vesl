@@ -7,8 +7,8 @@
 > `git show origin/main:.github/workflows/vesl-core-sync.yml`.
 >
 > This banner and the §2 per-finding banners supersede the "NOT READY FOR BETA" verdict in
-> §1 and items 1–9 of §9 with respect to the Critical findings. The **22 High findings
-> remain open** — remediation is tracked separately.
+> §1 and items 1–9 of §9 with respect to the Critical findings. The **22 High findings are
+> likewise remediated** as of 2026-05-20 — see the per-finding banners in §3.
 
 **Scope.** Adversarial whitebox audit of the three repositories that ship together for the Vesl beta release:
 
@@ -437,6 +437,8 @@ Per CLAUDE.md §7 and `AUDIT_FOLLOWUP_INDEX.md`, this workflow is the gate that 
 
 ### H-01 — Production Hoon kernels lack capacity caps on `registered` and `settled` maps
 
+> **RESOLVED — 2026-05-20 (`0433502`; JAMs `066dc29`; hull-llm `8d4f43d`).** A 10M `registered` cap and settle-graft-style epoch-rotation of the `settled` set landed in `kernel-arms.hoon` + `forge-kernel.hoon` and hull-llm's `vesl-kernel.hoon`.
+
 **Repo:** vesl-core (kernel-arms, guard, mint, settle, forge) + hull-llm (vesl-kernel, post-cleanup)
 **Files:**
 - `vesl-core/protocol/lib/kernel-arms.hoon:17-23` (`handle-register`)
@@ -456,6 +458,8 @@ Production `settled` set never rotates. `settle-graft.hoon` rotates at 1M settle
 
 ### H-02 — `vesl-entrypoint.hoon` bypasses all settlement guards (registration, root match, replay)
 
+> **RESOLVED — 2026-05-20 (hull-llm `f3821a1`).** The STAGED `vesl-entrypoint` arm is now `?>  %.n` (crashes unconditionally if a kernel composes it); confirmed imported by no shipped kernel.
+
 **Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
 **File:** `hull-llm/protocol/lib/vesl-entrypoint.hoon`
 
@@ -471,6 +475,8 @@ The file moved to hull-llm in the architectural cleanup (it imports `rag-logic` 
 
 ### H-03 — `forge-kernel.hoon` `%settle`/`%prove` `verify-chunk` depth-cap crashes the kernel poke instead of emitting a typed error
 
+> **RESOLVED — 2026-05-20 (`5582129`; JAMs `066dc29`).** `%settle`/`%prove` bind the leaf-verify result and emit a typed `%settle-error`/`%prove-error` effect instead of crashing the poke via `?>`.
+
 **Repo:** vesl-core
 **Files:** `protocol/lib/forge-kernel.hoon:128-133, 219-224`; `protocol/lib/vesl-merkle.hoon:119-121`
 
@@ -482,6 +488,8 @@ The file moved to hull-llm in the architectural cleanup (it imports `rag-logic` 
 
 ### H-04 — vesl-core's shim `from_belts([Belt; 8])` silently truncates high bits (M-08 fixed in vesl-wallet, NOT in vesl-core)
 
+> **RESOLVED — 2026-05-20 (`61870e7`).** `nock_belts8_to_vesl` range-checks each t8 chunk against `u32::MAX`, and `derive_pubkey` returns `Result` — out-of-range belts no longer panic the caller.
+
 **Repo:** vesl-core
 **File:** `crates/vesl-signing/...` — but vesl-core consumes vesl-signing via patch. The actual fix at `vesl-wallet/crates/vesl-signing/src/schnorr.rs:163` (rejects `v > u32::MAX`) is correct. However: vesl-core has its own `signing.rs::nock_belts8_to_vesl` (`crates/vesl-core/src/signing.rs:121`) that constructs the belts vector before passing to `SchnorrPrivateKey::from_belts`. If a caller routes attacker-influenced `[Belt; 8]` through `derive_pubkey`, the per-belt range is not checked at the vesl-core boundary — the check happens in vesl-signing, but only catches `v > u32::MAX`, not arbitrary out-of-G_ORDER scalars.
 
@@ -490,6 +498,8 @@ The file moved to hull-llm in the architectural cleanup (it imports `rag-logic` 
 ---
 
 ### H-05 — `RagVerifier::verify` ignores `note_id` despite the trait being audited specifically to add it
+
+> **RESOLVED — 2026-05-20 (hull-llm `612884b`).** `RagVerifier::verify` enforces `note_id == expected_root[0]`, binding the settled note to the manifest's Merkle root and closing the pre-commit race.
 
 **Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
 **File:** `hull-llm/src/rag_verifier.rs`
@@ -506,6 +516,8 @@ Every `Settle<RagVerifier>` consumer is vulnerable to the pre-commit race the tr
 
 ### H-06 — `RagVerifier::verify` and `build_settle_poke` allocate before bounding manifest size → OOM-class DoS
 
+> **RESOLVED — 2026-05-20 (hull-llm `612884b`).** A `MAX_MANIFEST_JSON_BYTES` (64 MiB) length check runs before `serde_json::from_slice` in both `RagVerifier::verify` and `build_settle_poke`.
+
 **Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
 **Files:** `hull-llm/src/rag_verifier.rs` (verify body); `hull-llm/src/manifest_pokes.rs` (build_settle_poke body)
 
@@ -519,6 +531,8 @@ The companion `Guard::check_manifest` / `Guard::validate_manifest` methods in `v
 
 ### H-07 — `Settle::settled_ids` grows unbounded; long-running hull leaks memory
 
+> **RESOLVED — 2026-05-20 (`489d3ac`, `1327286`).** `Settle::settled_ids` is FIFO-capped at 10⁶ entries (the kernel `settled` set remains the authoritative replay defense).
+
 **Repo:** vesl-core
 **File:** `crates/vesl-core/src/settle.rs:88, 164`
 
@@ -529,6 +543,8 @@ The companion `Guard::check_manifest` / `Guard::validate_manifest` methods in `v
 ---
 
 ### H-08 — Kernel pokes (`tx_builder::kernel_sig_hash`, `kernel_tx_id`) have no timeout
+
+> **RESOLVED — 2026-05-20 (`978c441`).** `kernel_sig_hash` and `kernel_tx_id` wrap the `app.poke` await in a 30s `tokio::time::timeout`.
 
 **Repo:** vesl-core
 **File:** `crates/vesl-core/src/tx_builder.rs:24-44, 46-68`
@@ -541,6 +557,8 @@ Both functions `await app.poke(...)` against a `NockApp` handle with no `tokio::
 
 ### H-09 — `D(amount_nicks)` / `D(fee_nicks)` / `D(key_index)` panic the wallet client on values ≥ 2^63
 
+> **RESOLVED — 2026-05-20 (`ac343b6`).** `wallet.rs` builds tx amount / fee / key-index atoms via `u64_to_noun` (picks `D()` vs indirect atom by size) — no `D()` panic above 2^63.
+
 **Repo:** vesl-core
 **File:** `crates/nockchain-client-rs/src/wallet.rs:236, 277, 282`
 
@@ -551,6 +569,8 @@ Both functions `await app.poke(...)` against a `NockApp` handle with no `tokio::
 ---
 
 ### H-10 — `cue_into` blob size in `find_*_entry` is unbounded → memory DoS
+
+> **RESOLVED — 2026-05-20 (`e3ec565`).** `find_*_entry` routes through a `cue_entry_blob` helper that rejects a `NoteDataEntry` blob over `MAX_BLOB_LEN` (1 MiB) before `cue_into`.
 
 **Repo:** vesl-core
 **File:** `crates/nockchain-client-rs/src/note_data.rs:131, 150, 178`
@@ -563,6 +583,8 @@ Every `find_*_entry` accepts the full `entry.blob: Bytes` and feeds it to `cue_i
 
 ### H-11 — gRPC clients default to plaintext `http://...`; no TLS path; no host pinning
 
+> **RESOLVED — 2026-05-20 (`ac3e6e0`).** `ChainClient`/`WalletClient` `connect()` reject a plaintext `http://` endpoint to a non-loopback host; `https://` (tonic webpki TLS) and loopback pass.
+
 **Repo:** vesl-core
 **Files:** `crates/nockchain-client-rs/src/chain.rs:46,57`; `crates/nockchain-client-rs/src/wallet.rs:54`
 
@@ -573,6 +595,8 @@ Every `find_*_entry` accepts the full `entry.blob: Bytes` and feeds it to `cue_i
 ---
 
 ### H-12 — `rejam_atom` panics on attacker-controlled bytes (M-03 from prior audit, still unfixed)
+
+> **RESOLVED — 2026-05-20 (`e10ab1c`).** `rejam_atom` returns `Result<Vec<u8>, RejamError>` instead of `.expect()`-panicking on malformed jam.
 
 **Repo:** vesl-core
 **File:** `crates/nock-noun-rs/src/lib.rs:200-206`
@@ -592,6 +616,8 @@ On the cross-graft cue-then-jam canonicalization path. A graft emitting malforme
 
 ### H-13 — SIWN replay-cache TTL is attacker-controlled (M-07 from prior audit, still unfixed)
 
+> **RESOLVED — 2026-05-20 (vesl-wallet `21ccb6a`).** The SIWN replay-cache window is clamped to `MAX_SIWN_WINDOW` (1h) — an attacker-set expiration can no longer pin a cache entry for decades.
+
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/caip122.rs:261-263`
 
@@ -602,6 +628,8 @@ On the cross-graft cue-then-jam canonicalization path. A graft emitting malforme
 ---
 
 ### H-14 — `schnorr_verify` does not require the pubkey to be on-curve
+
+> **RESOLVED — 2026-05-20 (vesl-wallet `a6a870c`).** `schnorr_verify` rejects an off-curve `pubkey` at entry, before any curve arithmetic.
 
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/schnorr.rs:261-296`
@@ -616,6 +644,8 @@ The `vesl-core/crates/vesl-core/src/signing.rs::nock_point_to_vesl` shim is exac
 
 ### H-15 — Demo signing key gate (`is_demo_key`) exists but is never invoked (M-09 from prior audit, still unfixed)
 
+> **RESOLVED — 2026-05-20 (vesl-nockup `d3c4f39`).** vesl-hull's `resolve_with_demo_key_checked` invokes `is_demo_key` and refuses the public demo key on the dumbnet path. (vesl-core's `resolve_dumbnet` never takes a demo key — no surface there.)
+
 **Repo:** vesl-nockup (the hull lib that uses demo keys)
 **Files:** `vesl-nockup/crates/vesl-hull/src/signing.rs:31`; `vesl-nockup/crates/vesl-hull/src/config.rs:117`
 
@@ -628,6 +658,8 @@ A developer who copies the fakenet config to dumbnet by mistake signs every tran
 ---
 
 ### H-16 — sync.sh sed-pattern injection via `$NOCK_PIN` allows arbitrary Cargo.toml rewrite
+
+> **RESOLVED — 2026-05-20 (vesl-nockup `574e2d4`).** `sync.sh` validates `NOCK_PIN` / `VESL_CORE_PIN` / `VESL_WALLET_PIN` against `^[0-9a-f]{40}$` before any sed rewrite.
 
 **Repo:** vesl-nockup
 **File:** `sync.sh:320-322`
@@ -645,6 +677,8 @@ sed -i -E \
 
 ### H-17 — `cp -rL` in sync.sh ingests upstream maintainer's untracked working-tree state
 
+> **RESOLVED — 2026-05-20 (vesl-nockup `574e2d4`).** `sync.sh` copies crates/templates via a `copy_tree` helper that prunes gitignored paths, and now refuses a dirty or untracked source tree.
+
 **Repo:** vesl-nockup
 **File:** `sync.sh:208,216,226,264,277,309`
 
@@ -655,6 +689,8 @@ sed -i -E \
 ---
 
 ### H-18 — sync.sh follows arbitrary symlinks; nockchain working-tree silently joins the trust boundary
+
+> **RESOLVED — 2026-05-20 (vesl-nockup `574e2d4`).** `sync.sh` asserts `hoon/common`, `hoon/dat`, `hoon/jams` each resolve into a `nockchain/hoon` tree before the symlink-dereferencing copy.
 
 **Repo:** vesl-nockup
 **File:** `sync.sh:208-216, 262-266`
@@ -667,6 +703,8 @@ sed -i -E \
 
 ### H-19 — Templates' `build.rs` invokes `nockup-graft` from PATH (RCE surface)
 
+> **RESOLVED — 2026-05-20 (`7522fc5`).** Templates' `build.rs` resolves the codegen binary from an explicit `NOCKUP_GRAFT_BIN` path (skip-with-warning if unset) — never a bare PATH search. (sha256-pinning was impractical: the binary is built fresh per repo.)
+
 **Repo:** vesl-nockup
 **Files:** `templates/{counter,data-registry,graft-hash-gate,graft-intent,graft-mint,graft-settle,settle-report}/build.rs`
 
@@ -677,6 +715,8 @@ Standard `build.rs` PATH risk. A malicious `nockup-graft` shim earlier on PATH t
 ---
 
 ### H-20 — Snapshot SHA-256 recorded but never verified on resume
+
+> **RESOLVED — 2026-05-20 (`36c61f3`).** `resume_with_data_dir` takes an optional source-hoon path; when supplied it re-hashes the source and warns on a `source_sha256` mismatch.
 
 **Repo:** vesl-core
 **File:** `crates/vesl-checkpoint/src/lib.rs:50-61, 188-232`
@@ -689,6 +729,8 @@ Standard `build.rs` PATH risk. A malicious `nockup-graft` shim earlier on PATH t
 
 ### H-21 — Dockerfile clones nockchain from `zorp-corp/nockchain` (likely outdated/wrong org) at outdated SHA
 
+> **RESOLVED — 2026-05-20 (`e6ea1ec`).** The tracked `docker/NOCKCHAIN_COMMIT` (the gitignored Dockerfile's pin-of-record) is bumped to `NOCK_PIN` with the `nockchain/nockchain` org; `check-pins.sh` and `bump-pin.sh` now validate/write that tracked file instead of the absent Dockerfile.
+
 **Repo:** vesl-core
 **File:** `Dockerfile:64-66`
 
@@ -699,6 +741,8 @@ The Dockerfile uses `git clone https://github.com/zorp-corp/nockchain.git` at SH
 ---
 
 ### H-22 — `vesl-core` `ci.yml` is documented-broken (workflow runs but cargo cannot resolve deps without sibling nockchain checkout)
+
+> **RESOLVED — 2026-05-20 (`4b06acf`).** `ci.yml`'s test / audit / clippy jobs check out sibling `nockchain/nockchain` at `NOCK_PIN`, mirroring `jam-determinism.yml`.
 
 **Repo:** vesl-core
 **File:** `.github/workflows/ci.yml`
