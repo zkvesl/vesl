@@ -6,9 +6,9 @@
 #
 # Currently supported pin type: `nock` (nockchain upstream).
 #
-# vesl-core's NOCK_PIN lives in two places:
+# vesl-core's NOCK_PIN lives in two tracked sites:
 #   .github/workflows/jam-determinism.yml  — CI's NOCK_PIN env
-#   Dockerfile                              — ARG NOCKCHAIN_COMMIT
+#   docker/NOCKCHAIN_COMMIT                 — the docker pin-of-record
 #
 # Both must move together; this script writes both in one shot.
 #
@@ -79,16 +79,16 @@ fi
 
 # --- Apply edits ---
 JAM_WF=".github/workflows/jam-determinism.yml"
-DOCKERFILE="Dockerfile"
+DOCKER_PIN="docker/NOCKCHAIN_COMMIT"
 
 case "$TYPE" in
     nock)
         # NOCK_PIN: <40hex>
         sed -i -E "s/(NOCK_PIN:[[:space:]]*)[0-9a-f]{40}/\1$SHA/" "$JAM_WF"
-        # ARG NOCKCHAIN_COMMIT=<40hex>
-        sed -i -E "s/(NOCKCHAIN_COMMIT=)[0-9a-f]{40}/\1$SHA/" "$DOCKERFILE"
+        # docker/NOCKCHAIN_COMMIT holds a bare SHA — overwrite it whole.
+        printf '%s\n' "$SHA" > "$DOCKER_PIN"
         echo "updated $JAM_WF"
-        echo "updated $DOCKERFILE"
+        echo "updated $DOCKER_PIN"
         ;;
 esac
 

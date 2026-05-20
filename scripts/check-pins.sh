@@ -5,17 +5,17 @@
 # the value:
 #
 #   .github/workflows/jam-determinism.yml  — CI's NOCK_PIN env
-#   Dockerfile                              — ARG NOCKCHAIN_COMMIT
+#   docker/NOCKCHAIN_COMMIT                 — the docker pin-of-record
 #
-# Audit H-21 flagged the Dockerfile as historically diverged (different
-# org + older SHA) from CI's pin. This gate catches that drift and
-# any future ghost-SHA mistakes before they reach main.
+# Audit H-21 flagged the local (gitignored) Dockerfile as historically
+# diverged from CI's pin. The tracked docker/NOCKCHAIN_COMMIT is now the
+# pin-of-record this gate validates; it catches drift and ghost-SHA
+# mistakes before they reach main.
 #
 # Checks performed:
 #   1. SHA shape: both sites must hold a 40-char lowercase hex SHA.
-#   2. Agreement: both sites must hold the SAME SHA. (warning, not
-#      hard fail — Dockerfile drift is a known historical issue;
-#      bump them together via scripts/bump-pin.sh nock <sha>.)
+#   2. Agreement: both sites must hold the SAME SHA. Bump them
+#      together via scripts/bump-pin.sh nock <sha>.
 #   3. Existence: SHA must be reachable in the nockchain repo. Prefers
 #      sibling ../nockchain/ rev-parse (offline-friendly); falls back
 #      to `git ls-remote` (requires network). On network failure, warns
@@ -31,7 +31,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 JAM_WF=".github/workflows/jam-determinism.yml"
-DOCKERFILE="Dockerfile"
+DOCKER_PIN="docker/NOCKCHAIN_COMMIT"
 
 status=0
 warnings=0
@@ -90,19 +90,21 @@ validate_sha_exists() {
 
 # --- NOCK_PIN extraction ---
 jam_sha=$(extract_sha "$JAM_WF" 'NOCK_PIN:[[:space:]]*[0-9a-f]+')
-docker_sha=$(extract_sha "$DOCKERFILE" 'NOCKCHAIN_COMMIT=[0-9a-f]+')
+docker_sha=$(extract_sha "$DOCKER_PIN" '[0-9a-f]{40}')
 
 # --- Shape validation ---
 validate_sha_shape "$JAM_WF NOCK_PIN" "$jam_sha"
-validate_sha_shape "$DOCKERFILE NOCKCHAIN_COMMIT" "$docker_sha"
+validate_sha_shape "$DOCKER_PIN" "$docker_sha"
 
-# --- Agreement (warn, not fail — H-21 is historical) ---
+# --- Agreement (AUDIT 2026-05-19 H-21: both sites are tracked and
+# bump-pin.sh writes them together, so a mismatch is now a real error,
+# not the historical drift the prior warn-only check tolerated) ---
 if [[ -n "$jam_sha" && -n "$docker_sha" ]]; then
     if [[ "$jam_sha" == "$docker_sha" ]]; then
-        ok "NOCK_PIN: jam-determinism.yml and Dockerfile agree ($jam_sha)"
+        ok "NOCK_PIN: jam-determinism.yml and $DOCKER_PIN agree ($jam_sha)"
     else
-        warn "NOCK_PIN: jam-determinism.yml ($jam_sha) != Dockerfile ($docker_sha)"
-        warn "  bump both atomically via: scripts/bump-pin.sh nock <sha>"
+        err "NOCK_PIN: jam-determinism.yml ($jam_sha) != $DOCKER_PIN ($docker_sha)"
+        err "  bump both atomically via: scripts/bump-pin.sh nock <sha>"
     fi
 fi
 
