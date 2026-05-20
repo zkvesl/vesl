@@ -105,10 +105,10 @@ impl<V: CommitmentVerifier> Settle<V> {
         // AUDIT 2026-05-19 H-07: bound the pre-flight cache — evict the
         // oldest id once at capacity so a long-running hull does not
         // leak unbounded replay state.
-        if self.settled_ids.len() >= SETTLED_IDS_CAP {
-            if let Some(old) = self.settled_order.pop_front() {
-                self.settled_ids.remove(&old);
-            }
+        if self.settled_ids.len() >= SETTLED_IDS_CAP
+            && let Some(old) = self.settled_order.pop_front()
+        {
+            self.settled_ids.remove(&old);
         }
         if self.settled_ids.insert(payload.note.id) {
             self.settled_order.push_back(payload.note.id);
