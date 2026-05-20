@@ -55,7 +55,22 @@ fn main() {
 /// include — so the build still succeeds when graft-inject isn't installed.
 fn emit_kernel_cause_tags(out_dir: &str, hoon_app_file: &str) {
     let cause_tags_out = format!("{}/kernel_cause_tags.rs", out_dir);
-    let result = Command::new("graft-inject")
+    // AUDIT 2026-05-19 H-19: resolve the codegen binary from an explicit
+    // path (NOCKUP_GRAFT_BIN), never a bare PATH search — a malicious
+    // graft-inject earlier on PATH would otherwise hijack `cargo build`.
+    // Unset → skip codegen (non-fatal; set it to enable the cause-tag
+    // drift check).
+    let graft_bin = match env::var("NOCKUP_GRAFT_BIN") {
+        Ok(p) => p,
+        Err(_) => {
+            println!(
+                "cargo:warning=NOCKUP_GRAFT_BIN unset — skipping cause-tag \
+                 codegen; set it to the graft-inject binary path to enable."
+            );
+            return;
+        }
+    };
+    let result = Command::new(&graft_bin)
         .args([
             "codegen",
             "kernel-cause-tags",
