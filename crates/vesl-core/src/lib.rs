@@ -112,7 +112,7 @@ pub use graft_pokes::batch::{
 // pulled from cue-emitting grafts (e.g., %queue-popped body) before
 // they're forwarded into cue-consuming grafts (%batch-add, %log-append,
 // %registry-put). See zkvesl-docs/reference/sdk.md "Cross-graft pipelines".
-pub use nock_noun_rs::rejam_atom;
+pub use nock_noun_rs::{rejam_atom, RejamError};
 
 // Peek-path builders + result decoders. See the `peek` module and
 // zkvesl-docs `reference/sdk.md` "Peek calls from Rust" for usage.

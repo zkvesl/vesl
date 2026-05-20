@@ -179,6 +179,19 @@ pub fn cue_from_bytes(stack: &mut NockStack, bytes: &[u8]) -> Option<Noun> {
     cue(stack, a).ok()
 }
 
+/// Error returned by [`rejam_atom`] when the input bytes are not a
+/// valid jam encoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejamError;
+
+impl std::fmt::Display for RejamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "rejam_atom: input is not valid jam")
+    }
+}
+
+impl std::error::Error for RejamError {}
+
 /// Re-jam an atom whose bytes came from a cue-emitting graft (e.g.
 /// `%queue-popped` body) so they can be fed to a cue-consuming graft
 /// (e.g. `%batch-add`) without double-cue corruption.
@@ -197,12 +210,13 @@ pub fn cue_from_bytes(stack: &mut NockStack, bytes: &[u8]) -> Option<Noun> {
 /// different back-ref schedules. The output is canonical under
 /// nockvm's jammer.
 ///
-/// Panics if `bytes` is not valid jam.
-pub fn rejam_atom(bytes: &[u8]) -> Vec<u8> {
+/// AUDIT 2026-05-19 H-12: returns `Err(RejamError)` when `bytes` is not
+/// valid jam. Previously this `.expect()`-panicked, so a graft emitting
+/// malformed bytes could crash the runtime via the next graft's rejam.
+pub fn rejam_atom(bytes: &[u8]) -> Result<Vec<u8>, RejamError> {
     let mut stack = new_stack();
-    let noun = cue_from_bytes(&mut stack, bytes)
-        .expect("rejam_atom: input is not valid jam");
-    jam_to_bytes(&mut stack, noun)
+    let noun = cue_from_bytes(&mut stack, bytes).ok_or(RejamError)?;
+    Ok(jam_to_bytes(&mut stack, noun))
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +382,7 @@ mod tests {
     fn rejam_atom_canonicalizes_atom() {
         let mut stack = new_stack();
         let bytes = jam_to_bytes(&mut stack, D(42));
-        let rejammed = rejam_atom(&bytes);
+        let rejammed = rejam_atom(&bytes).expect("rejam output");
         let mut s2 = new_stack();
         let cued = cue_from_bytes(&mut s2, &rejammed).expect("rejam output cues");
         let space = s2.noun_space();
@@ -380,7 +394,7 @@ mod tests {
         let mut stack = new_stack();
         let cell = T(&mut stack, &[D(1), D(2), D(3)]);
         let bytes = jam_to_bytes(&mut stack, cell);
-        let rejammed = rejam_atom(&bytes);
+        let rejammed = rejam_atom(&bytes).expect("rejam output");
         let mut s2 = new_stack();
         let cued = cue_from_bytes(&mut s2, &rejammed).expect("rejam output cues");
         let space = s2.noun_space();
@@ -399,7 +413,7 @@ mod tests {
         let mut stack = new_stack();
         let big = make_atom(&mut stack, &payload);
         let bytes = jam_to_bytes(&mut stack, big);
-        let rejammed = rejam_atom(&bytes);
+        let rejammed = rejam_atom(&bytes).expect("rejam output");
         // Both jams cue back to the same atom value.
         let mut s2 = new_stack();
         let original = cue_from_bytes(&mut s2, &bytes).expect("original cues");
@@ -414,10 +428,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "rejam_atom: input is not valid jam")]
-    fn rejam_atom_panics_on_malformed() {
+    fn rejam_atom_errors_on_malformed() {
         // 0xff has the high bit pattern of a valid jam prefix but no
         // backing data — cue rejects.
-        let _ = rejam_atom(&[0xff, 0xff]);
+        assert!(rejam_atom(&[0xff, 0xff]).is_err());
     }
 }
