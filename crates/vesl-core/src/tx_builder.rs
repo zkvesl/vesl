@@ -17,6 +17,11 @@ use noun_serde::{NounDecode, NounEncode};
 // Kernel-based hash computation
 // ---------------------------------------------------------------------------
 
+/// Wall-clock bound on a kernel poke (AUDIT 2026-05-19 H-08). A hung
+/// graft arm, an infinite loop, or a stalled STARK proof must not block
+/// the calling task forever. Matches vesl-hull's `poke_kernel_with_timeout`.
+const KERNEL_POKE_TIMEOUT_SECS: u64 = 30;
+
 /// Compute sig-hash by poking the Hoon kernel's `%sig-hash` handler.
 ///
 /// Sends `[%sig-hash seeds-jam fee]` where `seeds-jam` is the JAM'd noun
@@ -35,10 +40,13 @@ pub async fn kernel_sig_hash(
     let cmd = T(&mut poke_slab, &[tag, seeds_atom, fee_noun]);
     poke_slab.set_root(cmd);
 
-    let effects = app
-        .poke(SystemWire.to_wire(), poke_slab)
-        .await
-        .map_err(|e| anyhow::anyhow!("sig-hash poke failed: {e:?}"))?;
+    let effects = tokio::time::timeout(
+        std::time::Duration::from_secs(KERNEL_POKE_TIMEOUT_SECS),
+        app.poke(SystemWire.to_wire(), poke_slab),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("sig-hash poke timed out after {KERNEL_POKE_TIMEOUT_SECS}s"))?
+    .map_err(|e| anyhow::anyhow!("sig-hash poke failed: {e:?}"))?;
 
     extract_hash_from_effect(&effects, "sig-hash")
 }
@@ -59,10 +67,13 @@ pub async fn kernel_tx_id(
     let cmd = T(&mut poke_slab, &[tag, spends_atom]);
     poke_slab.set_root(cmd);
 
-    let effects = app
-        .poke(SystemWire.to_wire(), poke_slab)
-        .await
-        .map_err(|e| anyhow::anyhow!("tx-id poke failed: {e:?}"))?;
+    let effects = tokio::time::timeout(
+        std::time::Duration::from_secs(KERNEL_POKE_TIMEOUT_SECS),
+        app.poke(SystemWire.to_wire(), poke_slab),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("tx-id poke timed out after {KERNEL_POKE_TIMEOUT_SECS}s"))?
+    .map_err(|e| anyhow::anyhow!("tx-id poke failed: {e:?}"))?;
 
     extract_hash_from_effect(&effects, "tx-id")
 }
