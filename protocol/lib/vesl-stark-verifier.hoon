@@ -90,6 +90,12 @@
     |=  [=proof override=(unit (list term)) verifier-eny=@ test-mode=? s=* f=*]
     ^-  verify-result
     ?>  =(~ hashes.proof)
+    ::  AUDIT 2026-05-20 M-04: a submitted proof must arrive with its
+    ::  read cursor at 0 — the verifier pulls every object itself.  A
+    ::  non-zero read-index is malformed input; reject it explicitly
+    ::  rather than letting later proof-stream pulls drift silently.
+    ::
+    ?>  =(0 read-index.proof)
     =^  puzzle  proof
       =^(c proof ~(pull proof-stream proof) ?>(?=(%puzzle -.c) c^proof))
     ::
