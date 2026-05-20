@@ -22,7 +22,7 @@
 //! `%settle-settle` and avoids collision with `%mint-commit`.
 
 use nock_noun_rs::{
-    atom_from_u64, make_atom_in, make_list_in, make_loobean,
+    atom_from_u64, make_atom_in, make_cord_in, make_list_in, make_loobean,
     make_tag_in, slab_jam_to_bytes, NounSlab,
 };
 use nockchain_tip5_rs::{tip5_to_atom_le_bytes, ProofNode, Tip5Hash};
@@ -218,6 +218,50 @@ pub fn build_settle_note_bounded_poke(
         let proof_list = build_proof_list(slab, proof);
         T(slab, &[value_noun, bounds_noun, proof_list])
     })
+}
+
+/// Build a `%settle-note` poke whose `data` cell matches the
+/// `manifest-verify` gate's expected payload:
+/// `[fields=(list [name=@t value=@]) proofs=(list (list [hash=@ side=?]))]`.
+///
+/// Each `(name, value)` pair is committed as its own merkle leaf, and
+/// `proofs[i]` is the path rebinding `fields[i]` to `root`. Domain-
+/// agnostic: `fields` and `proofs` are plain byte / proof slices with no
+/// dependency on any manifest schema.
+pub fn build_settle_note_manifest_poke(
+    note_id: u64,
+    hull: u64,
+    root: &Tip5Hash,
+    fields: &[(&[u8], &[u8])],
+    proofs: &[Vec<ProofNode>],
+) -> NounSlab {
+    let mut slab = NounSlab::new();
+    let tag = make_tag_in(&mut slab, "settle-note");
+    let note_id_noun = atom_from_u64(&mut slab, note_id);
+    let hull_noun = atom_from_u64(&mut slab, hull);
+    let root_bytes = tip5_to_atom_le_bytes(root);
+    let root_noun = make_atom_in(&mut slab, &root_bytes);
+
+    let field_nouns: Vec<Noun> = fields
+        .iter()
+        .map(|(name, value)| {
+            let name_noun = make_cord_in(&mut slab, std::str::from_utf8(name).unwrap_or(""));
+            let value_noun = make_atom_in(&mut slab, value);
+            T(&mut slab, &[name_noun, value_noun])
+        })
+        .collect();
+    let fields_list = make_list_in(&mut slab, &field_nouns);
+
+    let proof_nouns: Vec<Noun> = proofs
+        .iter()
+        .map(|proof| build_proof_list(&mut slab, proof))
+        .collect();
+    let proofs_list = make_list_in(&mut slab, &proof_nouns);
+
+    let data = T(&mut slab, &[fields_list, proofs_list]);
+    let cause = T(&mut slab, &[tag, note_id_noun, hull_noun, root_noun, data]);
+    slab.set_root(cause);
+    slab
 }
 
 /// Build a `(list [hash=@ side=?])` from a slice of [`ProofNode`].
@@ -567,6 +611,19 @@ mod tests {
         let root = fixture_root();
         let slab =
             build_settle_note_bounded_poke(9, 1, &root, 42, (10, 100), &fixture_proof());
+        let bytes = slab_jam_to_bytes(&slab);
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn build_settle_note_manifest_poke_emits_nonempty_jam() {
+        let root = fixture_root();
+        let fields: [(&[u8], &[u8]); 2] = [
+            (b"name".as_slice(), b"alice".as_slice()),
+            (b"role".as_slice(), b"admin".as_slice()),
+        ];
+        let proofs = [fixture_proof(), fixture_proof()];
+        let slab = build_settle_note_manifest_poke(7, 1, &root, &fields, &proofs);
         let bytes = slab_jam_to_bytes(&slab);
         assert!(!bytes.is_empty());
     }

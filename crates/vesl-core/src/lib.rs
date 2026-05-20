@@ -75,7 +75,7 @@ pub use verify_tx::{fetch_receipt, TxInputView, TxOutputView, TxReceipt, VerifyT
 pub use graft_pokes::settle::{
     build_graft_single_leaf_payload_in, build_graft_single_leaf_payload_jammed,
     build_settle_note_bounded_poke, build_settle_note_ed25519_poke,
-    build_settle_note_membership_poke,
+    build_settle_note_manifest_poke, build_settle_note_membership_poke,
     build_settle_note_poke, build_settle_note_poke_with_data, build_settle_note_schnorr_poke,
     build_settle_poke_jammed, build_settle_register_poke, build_settle_verify_poke,
     build_settle_verify_poke_with_data,
