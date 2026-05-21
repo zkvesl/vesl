@@ -80,9 +80,11 @@ for kernel in guard mint settle forge; do
     fi
 
     # Compile into a per-kernel out file so a partial run doesn't corrupt later
-    # iterations. hoonc always writes out.jam in cwd; rename once we have it.
+    # iterations. --ephemeral runs the build in-memory (no PMA data dir), so
+    # looping over kernels doesn't trip hoonc's "data directory not empty"
+    # guard; hoonc writes out.jam in cwd, rename once we have it.
     rm -f out.jam
-    if ! hoonc --new "$src" hoon/ >/dev/null 2>&1; then
+    if ! hoonc --ephemeral "$src" hoon/ >/dev/null 2>&1; then
         echo "FAIL ${kernel}: hoonc exited non-zero." >&2
         status=1
         continue
