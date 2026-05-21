@@ -208,7 +208,9 @@ pub struct SettlementConfig {
     /// Whether to auto-submit settlement transactions on-chain.
     pub auto_submit: bool,
     /// How long to wait for TX acceptance before giving up (seconds).
-    /// Fakenet: 300s, dumbnet: 900s (blocks are ~10min).
+    /// Fakenet: 300s, dumbnet: 900s (blocks are ~10min). Local mode uses
+    /// u64::MAX as a sentinel: it never submits on-chain (can_submit() is
+    /// false), so this is never consumed as a real timeout (audit M-31).
     pub accept_timeout_secs: u64,
     /// Resolved wallet configuration. None when neither CLI nor TOML
     /// supplied a `[wallet]` block.
@@ -225,7 +227,7 @@ impl SettlementConfig {
             coinbase_timelock_min: 1,
             tx_fee: 256,
             auto_submit: false,
-            accept_timeout_secs: 0,
+            accept_timeout_secs: u64::MAX,
             wallet: None,
         }
     }
@@ -291,7 +293,7 @@ impl SettlementConfig {
             coinbase_timelock_min: 1,
             tx_fee: 256,
             auto_submit: false,
-            accept_timeout_secs: 0,
+            accept_timeout_secs: u64::MAX,
             wallet: wallet_cfg,
         }
     }
