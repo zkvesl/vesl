@@ -757,6 +757,8 @@ The workflow's own comment: "Full CI requires either (a) a checkout step that cl
 
 ### M-01 — Empty `results` list bypasses `verify-manifest` in Hoon kernel
 
+> **OPEN — flagged for security review (2026-05-20).** Assessed as likely-not-a-bug: the empty-`results` path still binds via the `built == prompt.mani` comparison, so no behavioral change was made. A reviewer should confirm before adding the `?>  !=(~ results.mani)` guard — that guard would also reject legitimately-empty manifests.
+
 **Repo:** hull-llm (post-cleanup)
 **File:** `hull-llm/protocol/lib/rag-logic.hoon` (`+verify-manifest`)
 
@@ -766,12 +768,16 @@ The workflow's own comment: "Full CI requires either (a) a checkout step that cl
 
 ### M-02 — Hoon `verify-manifest` doesn't enforce dup-id or null-byte chunk rules that Rust enforces
 
+> **RESOLVED — 2026-05-20 (hull-llm `9e3827c`; JAM `1ab09fc`).** `verify-manifest` now rejects duplicate chunk-ids (via an accumulated `(set @)`) and NUL-byte chunks — parity with the Rust `RagVerifier`.
+
 **Repo:** hull-llm (post-cleanup)
 **File:** `hull-llm/protocol/lib/rag-logic.hoon` (`+verify-manifest`) vs `hull-llm/src/rag_verifier.rs` (`RagVerifier::verify`)
 
 Rust rejects duplicate chunk IDs and chunks containing null bytes. Hoon doesn't. Strictly weaker on the direct-kernel-poke path. (Both files now live in hull-llm; the divergence is internal to the verified-RAG vertical.)
 
 ### M-03 — `verify-chunk` crashes (not %.n) on out-of-range sibling atoms
+
+> **RESOLVED — 2026-05-20 (`24586ee`; JAMs `f6b1580`).** `verify-chunk` range-guards each sibling hash against `p^5` and returns soft `%.n` instead of crashing `hash-pair` on an out-of-field atom.
 
 **Repo:** vesl-core
 **File:** `protocol/lib/vesl-merkle.hoon:96-130`
@@ -782,6 +788,8 @@ Sibling atom ≥ p^5 → `hash-ten-cell:tip5` asserts → kernel poke crash, not
 
 ### M-04 — `read-index` field in submitted proof is unvalidated
 
+> **RESOLVED — 2026-05-20 (`eca210a`; JAMs `f6b1580`).** `verify-inner` asserts `?>  =(0 read-index.proof)` immediately after the `hashes` check.
+
 **Repo:** vesl-core
 **File:** `protocol/lib/vesl-stark-verifier.hoon:79-86`
 
@@ -790,6 +798,8 @@ Verifier asserts `?>  =(~ hashes.proof)` but not `?>  =(0 read-index.proof)`. No
 **Fix:** One-line assert `?>  =(0 read-index.proof)` after the hashes check.
 
 ### M-05 — Caller-supplied `[s, f]` with non-Belt atoms crash `build-tree-data`
+
+> **RESOLVED — 2026-05-20 (`20128c5`; JAMs `f6b1580`).** `verify-inner` guards `?>  (based-noun s)` and `?>  (based-noun f)` before the `build-tree-data:fock` calls.
 
 **Repo:** vesl-core
 **File:** `protocol/lib/vesl-stark-verifier.hoon:179-184`
@@ -800,6 +810,8 @@ Verifier asserts `?>  =(~ hashes.proof)` but not `?>  =(0 read-index.proof)`. No
 
 ### M-06 — `split-and-fold` Horner fold is non-injective across manifest segments
 
+> **DEFERRED — 2026-05-20.** A length-prefix fix changes every STARK fold output — a breaking cross-VM digest-format change. Tracked as a separate v1→v2 format-version workstream, outside the medium-fix batch.
+
 **Repo:** vesl-core
 **File:** `protocol/lib/vesl-stark.hoon:26-52`
 
@@ -808,6 +820,8 @@ Folds `qb ++ ob ++ pb ++ chunk-belts` without separators. Two manifests with dif
 **Fix:** Prepend length prefixes to the fold-belts list before Horner.
 
 ### M-07 — `prove-computation` doesn't lower formula before `fink:fock`
+
+> **RESOLVED — 2026-05-20 (`50cc7b7`; JAMs `f6b1580`).** `prove-computation` lowers the formula to the Nock 0-8 subset (`/+  *vesl-lower`) before `fink:fock`.
 
 **Repo:** vesl-core
 **File:** `protocol/lib/vesl-prover.hoon:51-92`
@@ -818,6 +832,8 @@ Folds `qb ++ ob ++ pb ++ chunk-belts` without separators. Two manifests with dif
 
 ### M-08 — Hoon `validate-settlement-args` in `%verify` mode bypasses the replay check
 
+> **RESOLVED — 2026-05-20 (`ce7e778`; JAMs `f6b1580`).** `validate-settlement-args` documents that a `%verify` `[%.y ~]` is not a settle-safety guarantee — replay rejection is a `%mutate`-time outcome.
+
 **Repo:** vesl-core
 **File:** `protocol/lib/kernel-arms.hoon:74-79`
 
@@ -826,6 +842,8 @@ Folds `qb ++ ob ++ pb ++ chunk-belts` without separators. Two manifests with dif
 **Fix:** Add an opt-in `%can-settle` query that includes replay, or document the limitation prominently.
 
 ### M-09 — `hash-leaf` trailing-zero collisions (H-03 from prior audit, unfixed)
+
+> **DEFERRED — 2026-05-20.** `hash-leaf-v2-domain` is a breaking cross-VM digest-format change (alters every Merkle leaf hash; needs fixture regen). Tracked as a separate v1→v2 workstream — design doc `docs/AUDIT_H03_HASH_LEAF.md`.
 
 **Repo:** vesl-core
 **Files:** `protocol/lib/vesl-merkle.hoon:38-52`; `crates/nockchain-tip5-rs/src/lib.rs:131-161`
@@ -836,6 +854,8 @@ Both Rust and Hoon strip trailing zero bytes when chunking into belts. Documente
 
 ### M-10 — `bytes_to_belts` (vesl-signing) trailing-NUL collisions
 
+> **DEFERRED — 2026-05-20.** A length-prefix changes every `tip5_with_domain` output — a breaking digest-format change; grouped with the M-09 v1→v2 workstream.
+
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/domain.rs:129-143`
 
@@ -844,6 +864,8 @@ Both Rust and Hoon strip trailing zero bytes when chunking into belts. Documente
 **Fix:** Length-prefix in `bytes_to_belts` (emit `Belt(bytes.len() as u64)` first).
 
 ### M-11 — Non-constant-time scalar multiplication leaks the Schnorr nonce
+
+> **DEFERRED — 2026-05-20.** `ch_scal_big` is left unchanged and flagged for a reviewer fluent in constant-time EC arithmetic — a constant-time rewrite is expert work, not a mechanical fix.
 
 **Repo:** vesl-wallet
 **Files:** `crates/vesl-signing/src/math/cheetah.rs:333-346` (`ch_scal_big`), `:304-318` (`ch_add`), `:272-280` (`ch_double`)
@@ -854,6 +876,8 @@ Textbook double-and-add: iteration count = scalar bit-length; `ch_add` has multi
 
 ### M-12 — `SchnorrPrivateKey` derives `Debug`; raw scalar leaks via `{:?}`
 
+> **RESOLVED — 2026-05-20 (vesl-wallet `c0b4277`).** `SchnorrPrivateKey` and `ExtKey` drop the derived `Debug` for a hand-written `<redacted>` impl. (`DerivedKey` already had no `Debug` derive.)
+
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/schnorr.rs:93-95`
 
@@ -862,6 +886,8 @@ Textbook double-and-add: iteration count = scalar bit-length; `ch_add` has multi
 **Fix:** Manual `Debug` impl printing `<redacted>`. Same for `ExtKey`, `DerivedKey`.
 
 ### M-13 — Secrets never zeroized despite `zeroize` dependency
+
+> **RESOLVED — 2026-05-20 (vesl-wallet `f1354c6`).** The 64-byte BIP-39 seed is `Zeroizing`-wrapped and `bip39/zeroize` is enabled. The `ibig::UBig` scalar residual is documented in-source — a byte-backed-key refactor was scoped out by decision.
 
 **Repo:** vesl-wallet
 **Files:** `crates/vesl-wallet/Cargo.toml:27-28`; `crates/vesl-signing/src/schnorr.rs:94`; `crates/vesl-wallet/src/hd.rs:68-78`; `crates/vesl-wallet/src/wallet.rs:21-27`
@@ -872,6 +898,8 @@ Textbook double-and-add: iteration count = scalar bit-length; `ch_add` has multi
 
 ### M-14 — Replay cache is in-memory only; restart = empty cache (M-05 from prior audit)
 
+> **DEFERRED — 2026-05-20.** A persistent replay-cache backend is an infrastructure addition; out of the medium-fix batch (the ADR-0010 deferral stands).
+
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/replay_cache.rs:55-86`
 
@@ -880,6 +908,8 @@ ADR-0010 deferred. For a load-balanced fleet, an attacker presents the same bund
 **Fix:** Either ship a Redis backend behind a feature flag, or document loudly that this implementation requires sticky sessions.
 
 ### M-15 — `parse_caip122_message` accepts CRLF, doesn't assert blank-line empty, doesn't reject trailing junk
+
+> **RESOLVED — already remediated by C-05 (vesl-wallet `43d8b8d`); verified 2026-05-20.** `parse_caip122_message` rejects `\r`, asserts the blank line empty, and rejects trailing content past the last field.
 
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/caip122.rs:124, 136-138, 144`
@@ -890,6 +920,8 @@ Parser laxity compounds with C-05 (field injection). `_blank` is read but conten
 
 ### M-16 — `verify` panics on poisoned replay-cache mutex
 
+> **RESOLVED — 2026-05-20 (vesl-wallet `7db4e51`).** The replay-cache locks recover from a poisoned mutex (`lock().unwrap_or_else(|e| e.into_inner())`) instead of panicking.
+
 **Repo:** vesl-wallet
 **File:** `crates/vesl-signing/src/replay_cache.rs:68, 77`
 
@@ -898,6 +930,8 @@ Parser laxity compounds with C-05 (field injection). `_blank` is read but conten
 **Fix:** `lock().unwrap_or_else(|p| p.into_inner())` or `parking_lot::Mutex`.
 
 ### M-17 — `make_tas(slab, hash_b58)` constructs Hoon `@tas` from base58 strings (contains uppercase)
+
+> **RESOLVED — 2026-05-20 (`5816c5f`).** base58 args build through a `make_cord` helper (a plain byte-atom), not `make_tas` — no constructor now mislabels base58 data as `@tas`.
 
 **Repo:** vesl-core
 **File:** `crates/nockchain-client-rs/src/wallet.rs:235, 271, 272, 278, 289`
@@ -908,12 +942,16 @@ Hoon `@tas` requires lowercase + digits + hyphen. Base58 contains uppercase. The
 
 ### M-18 — `mont_reduction` precondition not enforced at the Rust API (sub-finding of C-04)
 
+> **RESOLVED — already remediated by C-04 (`8486bd7`); verified 2026-05-20.** `check_tip5_limbs` range-checks limbs at the `verify_proof` / `find_hash_entry` boundary — this sub-finding closes with C-04.
+
 **Repo:** vesl-core
 **File:** `crates/nockchain-tip5-rs/src/lib.rs` (consumed via nockchain-math)
 
 `mont_reduction` debug-asserts `a < RP`. With limbs at `u64::MAX`, the inputs are out of documented range. Tied to C-04; closes when C-04 closes.
 
 ### M-19 — `verify_proof`'s `ct_eq` is misleading
+
+> **RESOLVED — 2026-05-20 (`396bc84`).** The misleading "constant-time" comment on `verify_proof` is corrected — only the final `ct_eq` is constant-time; the `hash_pair` recompute above it is not (and proof contents are public anyway).
 
 **Repo:** vesl-core
 **File:** `crates/nockchain-tip5-rs/src/lib.rs:213-216`
@@ -924,6 +962,8 @@ The byte-level `ct_eq` is correct but the recomputation loop has data-dependent 
 
 ### M-20 — `peek_atom_u64` collapses absent-path with zero-value
 
+> **RESOLVED — 2026-05-20 (`5514f8c`).** Added `peek_atom_u64_strict` + a `PeekError` type — a depth-aware decoder distinguishing `Ok(None)` (absent path) from `Ok(Some(0))` (real zero). `peek_atom_u64` is kept for non-security callers.
+
 **Repo:** vesl-core
 **File:** `crates/vesl-core/src/peek.rs:150-165`
 
@@ -932,6 +972,8 @@ Returns `Some(0)` for both "path didn't bind" and "path bound to zero." Critical
 **Fix:** Add a `peek_atom_u64_strict` variant returning `Result<Option<u64>, PeekError>`.
 
 ### M-21 — `build_settle_note_manifest_poke` silently coerces non-UTF8 field names to empty string
+
+> **RESOLVED — 2026-05-20 (hull-llm `7b0ced9`).** `build_settle_note_manifest_poke` builds the field-name cord from raw bytes (`make_atom_in`) — no lossy `from_utf8(...).unwrap_or("")`.
 
 **Repo:** hull-llm (post-cleanup; was vesl-core pre-2026-05-19)
 **File:** `hull-llm/src/manifest_pokes.rs` (`build_settle_note_manifest_poke`)
@@ -942,6 +984,8 @@ Returns `Some(0)` for both "path didn't bind" and "path bound to zero." Critical
 
 ### M-22 — u64 → usize truncation in `build_seeds` on 32-bit targets
 
+> **RESOLVED — 2026-05-20 (`9bbdfbe`).** `build_seeds` converts the gift amount with `usize::try_from`, returning an error on 32-bit overflow instead of silently truncating.
+
 **Repo:** vesl-core
 **File:** `crates/vesl-core/src/settle.rs:238`
 
@@ -950,6 +994,8 @@ Returns `Some(0)` for both "path didn't bind" and "path bound to zero." Critical
 **Fix:** `usize::try_from(output_amount).map_err(...)?` or `compile_error!` for 32-bit targets.
 
 ### M-23 — `templates/vesl/Cargo.toml` pins inconsistent older nockchain SHA
+
+> **RESOLVED — 2026-05-20 (vesl-nockup `23c288e`).** The `vesl` template's three nockchain git-rev pins are bumped to `NOCK_PIN` (`fe46f4e3`).
 
 **Repo:** vesl-nockup
 **File:** `templates/vesl/Cargo.toml:13-15`
@@ -960,6 +1006,8 @@ Other templates use `NOCK_PIN=fe46f4e3...`. vesl template uses `1a23ccdab...` (1
 
 ### M-24 — Manifest body strings spliced verbatim into compiled Hoon; `--lib-dir` warn-only
 
+> **RESOLVED — 2026-05-20 (vesl-nockup `94fae22`).** An out-of-tree `--lib-dir` (no `nockapp.toml` ancestor) is refused unless `--accept-untrusted-libs` is passed; `select_grafts` — the inject/list splice path — enforces it.
+
 **Repo:** vesl-nockup
 **Files:** `tools/graft-inject/src/inject.rs:288-294, 337-341`; `tools/graft-inject/src/util.rs:108-121`
 
@@ -968,6 +1016,8 @@ Other templates use `NOCK_PIN=fe46f4e3...`. vesl template uses `1a23ccdab...` (1
 **Fix:** Refuse without `--accept-untrusted-libs`. Print per-manifest sha256 before splicing.
 
 ### M-25 — `tools/test-registry/run-init.sh:56` reuses the sed-injection antipattern
+
+> **RESOLVED — 2026-05-20 (vesl-nockup `75bfb76`).** `run-init.sh` substitutes via a bash `${//}` parameter-expansion loop — no `sed` delimiter for a path char (`|`, `&`, `\`) to corrupt.
 
 **Repo:** vesl-nockup
 **File:** `tools/test-registry/run-init.sh:56`
@@ -978,6 +1028,8 @@ Other templates use `NOCK_PIN=fe46f4e3...`. vesl template uses `1a23ccdab...` (1
 
 ### M-26 — `vesl-checkpoint` schema-extension resume resets per-graft state to type defaults
 
+> **DEFERRED — 2026-05-20.** A checkpoint state-migration helper (or a `--strict-state-shape` flag) is an infrastructure addition; out of the medium-fix batch.
+
 **Repo:** vesl-core
 **File:** `crates/vesl-checkpoint/src/lib.rs:173-187`
 
@@ -986,6 +1038,8 @@ Documented behavior: v0.2 resets per-graft state on schema-extension resume. Ope
 **Fix:** Add a migration helper or at minimum a `--strict-state-shape` flag that errors instead of resetting.
 
 ### M-27 — Templates' `Cargo.lock` excluded from sync.sh `--verify` diff
+
+> **RESOLVED — 2026-05-20 (vesl-nockup `7be20e1`).** Verified obsolete: no template `Cargo.lock` is tracked (blanket-gitignored), so the `--verify` exclusion is correct, not a drift gap. The intent is now documented in `.gitignore`.
 
 **Repo:** vesl-nockup
 **File:** `sync.sh:447`
@@ -996,6 +1050,8 @@ Documented behavior: v0.2 resets per-graft state on schema-extension resume. Ope
 
 ### M-28 — `templates/*/app.nock` and `out.jam` artifacts ship via sync.sh
 
+> **RESOLVED — already remediated by H-17 (vesl-nockup `574e2d4`); verified 2026-05-20.** `sync.sh`'s `copy_tree` prunes gitignored `app.nock` / `out.jam` artifacts.
+
 **Repo:** vesl-nockup (via vesl-core)
 **Files:** `vesl-core/templates/{counter,data-registry,graft-intent,settle-report}/app.nock`, `out.jam`
 
@@ -1004,6 +1060,8 @@ Stale compiled-kernel binaries from maintainer's local builds. `cp -rL` ingests 
 **Fix:** Add `rm -f "$here/templates/$t/app.nock" "$here/templates/$t/out.jam"` to sync.sh.
 
 ### M-29 — `vesl-checkpoint/.data.vesl-checkpoint-test/` SQLite + PMA files leak via sync
+
+> **RESOLVED — already remediated by H-17 (vesl-nockup `574e2d4`); verified 2026-05-20.** `sync.sh`'s `copy_tree` prunes the gitignored `.data.*` directories.
 
 **Repo:** vesl-nockup (via vesl-core)
 **Files:** `vesl-core/crates/vesl-checkpoint/.data.vesl-checkpoint-test/*`
@@ -1014,6 +1072,8 @@ Same root cause as M-28. `cp -rL` slurps maintainer runtime test data, including
 
 ### M-30 — Repeated `unsafe { *slab.root() }` not encapsulated
 
+> **RESOLVED — 2026-05-20 (`1035e8b`).** The eight `unsafe { *slab.root() }` sites route through one `slab_root_noun` helper carrying the single `SAFETY:` comment.
+
 **Repo:** vesl-core
 **File:** `crates/vesl-core/src/peek.rs:151, 242, 274, 307, 348, 361, 377, 389`
 
@@ -1022,6 +1082,8 @@ Eight call sites duplicate the same `unsafe` dereference with the same SAFETY ar
 **Fix:** Single `pub(crate) fn slab_root_noun(slab: &NounSlab) -> Noun` helper.
 
 ### M-31 — `accept_timeout_secs: 0` in `SettlementConfig::local` is structurally fine but foot-shape
+
+> **RESOLVED — 2026-05-20 (`edc40b3`).** Local-mode `accept_timeout_secs` is the `u64::MAX` "never waits" sentinel, not `0`, in both `local()` and `resolve_local()`.
 
 **Repo:** vesl-core
 **File:** `crates/vesl-core/src/config.rs:228, 294`
