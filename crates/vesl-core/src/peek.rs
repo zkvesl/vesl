@@ -148,7 +148,7 @@ pub fn peek_loobean(result: &NounSlab) -> Option<bool> {
 ///   extra `[~ ...]` layer beyond the standard 2-deep peek wrap; the
 ///   walk handles either depth without caller awareness.
 pub fn peek_atom_u64(result: &NounSlab) -> Option<u64> {
-    let noun = unsafe { *result.root() };
+    let noun = slab_root_noun(result);
     let space = result.noun_space();
     let mut handle = noun.in_space(&space);
     loop {
@@ -238,8 +238,7 @@ pub fn peek_unit_list<T>(
 /// returns `None` purely because of byte-encoding noise — only when the
 /// effect's *shape* prevents a head-tag from being read at all).
 pub fn effect_head_tag(effect: &NounSlab) -> Option<String> {
-    // SAFETY: the slab outlives this function call.
-    let root = unsafe { *effect.root() };
+    let root = slab_root_noun(effect);
     let space = effect.noun_space();
     let cell = root.in_space(&space).as_cell().ok()?;
     let tag_atom = cell.head().as_atom().ok()?;
@@ -270,8 +269,7 @@ pub fn decode_settle_error(effect: &NounSlab) -> Option<String> {
     if effect_head_tag(effect).as_deref() != Some("settle-error") {
         return None;
     }
-    // SAFETY: the slab outlives this function call.
-    let root = unsafe { *effect.root() };
+    let root = slab_root_noun(effect);
     let space = effect.noun_space();
     let cell = root.in_space(&space).as_cell().ok()?;
     let msg_atom = cell.tail().as_atom().ok()?;
@@ -303,8 +301,7 @@ pub fn decode_queue_popped(effects: &[NounSlab]) -> Option<(u64, Vec<u8>)> {
         }
 
         // Tag matched: effect_head_tag confirmed [%queue-popped *].
-        // SAFETY: the slab outlives this function call.
-        let root = unsafe { *slab.root() };
+        let root = slab_root_noun(slab);
         let space = slab.noun_space();
         let cell = root.in_space(&space).as_cell().ok()?;
 
@@ -330,6 +327,19 @@ pub fn decode_queue_popped(effects: &[NounSlab]) -> Option<(u64, Vec<u8>)> {
     None
 }
 
+/// Copy a slab's root [`Noun`] out by value.
+///
+/// Centralizes the one `unsafe` deref of `NounSlab::root()` that the
+/// peek and effect decoders share.
+///
+/// SAFETY: `root()` returns a pointer into the slab's arena. The
+/// `&NounSlab` borrow keeps that arena alive for the duration of the
+/// call, and `Noun` is `Copy`, so the returned value is a self-contained
+/// copy that outlives the borrow.
+pub(crate) fn slab_root_noun(slab: &NounSlab) -> Noun {
+    unsafe { *slab.root() }
+}
+
 /// Atoms are word-aligned little-endian; trim trailing zero padding so
 /// the returned bytes match the cord/atom the caller fed in.
 fn trim_trailing_zeros(bytes: &[u8]) -> &[u8] {
@@ -345,7 +355,7 @@ fn trim_trailing_zeros(bytes: &[u8]) -> &[u8] {
 /// outlives every caller of this function.
 fn strip_triple_unit_envelope(result: &NounSlab) -> Option<Noun> {
     let space = result.noun_space();
-    let noun = unsafe { *result.root() };
+    let noun = slab_root_noun(result);
     let outer = noun.in_space(&space).as_cell().ok()?;
     let inner_cell = outer.tail().as_cell().ok()?;
     Some(inner_cell.tail().noun())
@@ -358,7 +368,7 @@ mod tests {
     #[test]
     fn build_hull_peek_path_emits_three_element_path() {
         let slab = build_hull_peek_path("settle-registered", 42);
-        let noun = unsafe { *slab.root() };
+        let noun = slab_root_noun(&slab);
         let space = slab.noun_space();
         let outer = noun.in_space(&space).as_cell().expect("outer cell");
         let _tag = outer.head();
@@ -374,7 +384,7 @@ mod tests {
     #[test]
     fn build_keyed_peek_path_round_trips_cord() {
         let slab = build_keyed_peek_path("kv-value", "greeting");
-        let noun = unsafe { *slab.root() };
+        let noun = slab_root_noun(&slab);
         let space = slab.noun_space();
         let outer = noun.in_space(&space).as_cell().unwrap();
         let tail = outer.tail().as_cell().unwrap();
@@ -386,7 +396,7 @@ mod tests {
     #[test]
     fn build_keyless_peek_path_is_two_element() {
         let slab = build_keyless_peek_path("log-len");
-        let noun = unsafe { *slab.root() };
+        let noun = slab_root_noun(&slab);
         let space = slab.noun_space();
         let outer = noun.in_space(&space).as_cell().unwrap();
         assert_eq!(
