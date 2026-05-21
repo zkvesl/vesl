@@ -128,6 +128,11 @@
     ::
     ::  %registry-del — strict remove. Error on missing key.
     ::
+    ::  AUDIT 2026-05-21 L-10: deliberately the strict half of the
+    ::  delete-semantics pair — kv-graft's %kv-delete is idempotent (it
+    ::  noops on a missing key). A composer wiring both grafts must not
+    ::  assume one delete convention covers the other.
+    ::
       %registry-del
     ?.  (~(has by entries.state) key.cause)
       :_  state

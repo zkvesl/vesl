@@ -140,10 +140,10 @@
 ::             leaf-hash is bound to the root via the supplied path.
 ::  Use case : allowlists, blocklists, voter rosters, membership rolls.
 ::
-::  Note: catalog's `proof=@` shorthand resolves to the typed
-::  sibling-list here, avoiding an extra `cue` step inside the gate.
-::  Apps that ship jammed proofs should cue them at the edge before
-::  poking the kernel.
+::  AUDIT 2026-05-21 L-13: this gate takes the typed sibling-list
+::  `proof=(list [hash=@ side=?])` directly — there is no `proof=@`
+::  jammed-blob shorthand path. An app that ships a jammed proof must
+::  `cue` it at the edge before poking the kernel.
 ::
 ++  set-membership-verify
   |=  [note-id=@ data=* expected-root=@]

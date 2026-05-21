@@ -142,6 +142,10 @@
   ^-  (unit @t)
   ?-  -.r
       %non-empty
+    ::  AUDIT 2026-05-21 L-12: "non-empty" means the body is not the nil
+    ::  noun `~` (atom 0). Any cell — including `[~ ~]` — counts as a
+    ::  non-empty body and passes. A future content-shaped rule (length,
+    ::  in-set) needs its own arm; do not overload %non-empty.
     ?:  =(~ body)
       [~ 'validate: body is empty (rule: non-empty)']
     ~

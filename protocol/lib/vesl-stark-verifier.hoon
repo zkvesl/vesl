@@ -12,6 +12,15 @@
 +$  verify-result  [commitment=noun-digest:tip5 nonce=noun-digest:tip5]
 +$  elem-list  (list [idx=@ trace-elems=(list belt) comp-elems=(list felt) deep-elem=felt])
 ::
+::  AUDIT 2026-05-21 L-16: `verifier-eny` (param of +verify and
+::  +verify-settlement) seeds the random permutation of the Merkle-
+::  opening check order inside +verify-merk-proofs — a DDoS-hardening
+::  measure so an attacker can't predict which openings are probed in
+::  which order. Production callers MUST pass real entropy (block
+::  height, a timestamp, OS randomness). The test suite passes `0`,
+::  which makes the ordering deterministic — fine for tests, but it
+::  defeats the DDoS guard if a production caller does the same.
+::
 ++  verify
   =|  test-mode=_|
   |=  [=proof override=(unit (list term)) verifier-eny=@ s=* f=*]

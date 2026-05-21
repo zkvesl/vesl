@@ -84,6 +84,11 @@
     ::
     ::  %kv-delete — noop on missing key (idempotent)
     ::
+    ::  AUDIT 2026-05-21 L-10: deliberately the loose half of the
+    ::  delete-semantics pair — registry-graft's %registry-del is strict
+    ::  (it errors on a missing key). A composer wiring both grafts must
+    ::  not assume one delete convention covers the other.
+    ::
       %kv-delete
     =/  new-store  (~(del by store.state) key.cause)
     :_  state(store new-store)

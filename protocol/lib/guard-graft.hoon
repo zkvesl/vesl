@@ -113,6 +113,11 @@
 ::
 ::  Returns ~ for unrecognized paths (pass through to your kernel's peek).
 ::
+::  AUDIT 2026-05-21 L-09: a matched path returns `[~ [~ (unit @)]]` —
+::  two Grift peek-envelope layers wrapping the `(~(get by) …)` lookup,
+::  which is itself a `(unit @)`. Hence the triple-nested return type;
+::  the innermost `(unit @)` is `~` when the hull-id isn't registered.
+::
 ++  guard-peek
   |=  [state=guard-state =path]
   ^-  (unit (unit *))

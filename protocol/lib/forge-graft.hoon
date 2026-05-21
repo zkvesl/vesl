@@ -50,6 +50,12 @@
 ::  mixes in). Returns an effects list; callers keep their own state
 ::  untouched when threading the result.
 ::
+::  AUDIT 2026-05-21 L-11: forge-poke does NOT check that the cause's
+::  `hull` / `note-id` reference a registered root — forge is stateless
+::  by construction (see the file header). A composer that needs
+::  registration enforcement must pair forge-graft with a stateful
+::  graft, e.g. settle-graft, which holds the registered-roots set.
+::
 ++  forge-poke
   |=  cause=forge-cause
   ^-  (list forge-effect)
