@@ -231,13 +231,23 @@ pub fn build_peek_path(segments: &[&str]) -> Vec<u8> {
     slab.jam().to_vec()
 }
 
+/// Build a plain cord atom from a string's bytes.
+///
+/// AUDIT 2026-05-20 M-17: `make_tas` is byte-identical to this — it is
+/// just `Atom::from_bytes` — but its name implies a Hoon `@tas` term.
+/// base58 hashes and addresses are not valid `@tas` (they contain
+/// uppercase), so build those through this honestly-named constructor.
+fn make_cord(slab: &mut NounSlab<NockJammer>, s: &str) -> Noun {
+    make_tas(slab, s).as_noun()
+}
+
 /// Build a JAM-encoded `sign-hash` poke payload.
 ///
 /// Noun format: `[%sign-hash hash-cord index-atom hardened-loobean]`
 pub fn build_sign_hash_poke(hash_b58: &str, key_index: u64, hardened: bool) -> Vec<u8> {
     let mut slab: NounSlab<NockJammer> = NounSlab::new();
     let tag = make_tas(&mut slab, "sign-hash").as_noun();
-    let hash = make_tas(&mut slab, hash_b58).as_noun();
+    let hash = make_cord(&mut slab, hash_b58);
     // AUDIT 2026-05-19 H-09: u64_to_noun picks D() vs indirect atom by
     // size; a bare D() panics the process on key_index >= 2^63.
     let index = crate::note_data::u64_to_noun(&mut slab, key_index);
@@ -275,8 +285,8 @@ pub fn build_create_tx_poke(
     let tag = make_tas(&mut slab, "create-tx").as_noun();
 
     // names: list of [first last] pairs
-    let first = make_tas(&mut slab, input_first).as_noun();
-    let last = make_tas(&mut slab, input_last).as_noun();
+    let first = make_cord(&mut slab, input_first);
+    let last = make_cord(&mut slab, input_last);
     let name_pair = T(&mut slab, &[first, last]);
     let names = T(&mut slab, &[name_pair, D(0)]);
 
@@ -284,7 +294,7 @@ pub fn build_create_tx_poke(
     // AUDIT 2026-05-19 H-09: u64_to_noun picks D() vs indirect atom by
     // size; a bare D() panics the process on a tx amount / fee >= 2^63.
     let amt = crate::note_data::u64_to_noun(&mut slab, amount_nicks);
-    let addr = make_tas(&mut slab, recipient_address).as_noun();
+    let addr = make_cord(&mut slab, recipient_address);
     let recipient_pair = T(&mut slab, &[amt, addr]);
     let order = T(&mut slab, &[recipient_pair, D(0)]);
 
