@@ -110,18 +110,18 @@ fn same_code_signs_under_intent_and_payment_keys_via_toml_toggle() {
     let (i_chal, i_sig) = schnorr_sign(&intent_key, &intent_msg).unwrap();
     let (p_chal, p_sig) = schnorr_sign(&payment_key, &payment_msg).unwrap();
 
-    schnorr_verify(&intent_key.public_key(), &intent_msg, &i_chal, &i_sig)
+    schnorr_verify(&intent_key.public_key().unwrap(), &intent_msg, &i_chal, &i_sig)
         .expect("intent signature verifies under its own pubkey");
-    schnorr_verify(&payment_key.public_key(), &payment_msg, &p_chal, &p_sig)
+    schnorr_verify(&payment_key.public_key().unwrap(), &payment_msg, &p_chal, &p_sig)
         .expect("payment signature verifies under its own pubkey");
 
     // Cross-verify: each pubkey rejects the other's signature.
     assert!(
-        schnorr_verify(&intent_key.public_key(), &payment_msg, &p_chal, &p_sig).is_err(),
+        schnorr_verify(&intent_key.public_key().unwrap(), &payment_msg, &p_chal, &p_sig).is_err(),
         "intent pubkey must NOT verify a payment-key signature"
     );
     assert!(
-        schnorr_verify(&payment_key.public_key(), &intent_msg, &i_chal, &i_sig).is_err(),
+        schnorr_verify(&payment_key.public_key().unwrap(), &intent_msg, &i_chal, &i_sig).is_err(),
         "payment pubkey must NOT verify an intent-key signature"
     );
 }

@@ -27,6 +27,12 @@ use crate::types::{CommitmentVerifier, GraftPayload, Note};
 /// defers the duplicate rejection to the kernel.
 const SETTLED_IDS_CAP: usize = 1_000_000;
 
+/// Upper bound on a [`GraftPayload`]'s `data` field (AUDIT 2026-05-21
+/// L-05). `poke_bytes` JAMs the payload into a noun; an unbounded `data`
+/// vector lets a caller drive an arbitrarily large allocation. 64 MiB
+/// mirrors hull-llm's `MAX_MANIFEST_JSON_BYTES` cap on the RAG path.
+const MAX_POKE_DATA_BYTES: usize = 64 * 1024 * 1024;
+
 /// Generic settlement orchestrator parameterized by a domain `CommitmentVerifier`.
 ///
 /// Vesl-core ships only the trait; concrete verifier implementations live in
@@ -127,6 +133,13 @@ impl<V: CommitmentVerifier> Settle<V> {
     /// handle. This method returns the serialized poke so callers can feed
     /// it to `NockApp::poke()` themselves.
     pub fn poke_bytes(&self, payload: &GraftPayload) -> Result<Vec<u8>> {
+        // AUDIT 2026-05-21 L-05: bound the payload before building the poke
+        // so an oversized `data` vector can't drive an unbounded JAM alloc.
+        anyhow::ensure!(
+            payload.data.len() <= MAX_POKE_DATA_BYTES,
+            "graft payload data is {} bytes, over the {MAX_POKE_DATA_BYTES}-byte cap",
+            payload.data.len()
+        );
         let slab = self.verifier.build_settle_poke(payload)?;
         Ok(nock_noun_rs::slab_jam_to_bytes(&slab))
     }
@@ -202,7 +215,8 @@ pub fn build_witness(
 
     let pubkey = crate::signing::derive_pubkey(signing_key)
         .map_err(|e| anyhow::anyhow!("pubkey derivation failed: {e}"))?;
-    let pkh = crate::signing::pubkey_hash(&pubkey);
+    let pkh = crate::signing::pubkey_hash(&pubkey)
+        .map_err(|e| anyhow::anyhow!("pubkey hash failed: {e}"))?;
 
     let input_condition = if is_coinbase {
         SpendCondition::coinbase_pkh(pkh.clone(), coinbase_timelock_min)

@@ -88,7 +88,8 @@ pub fn build_keyless_peek_path(tag: &str) -> NounSlab {
 ///
 /// Structural mismatches (peek result wasn't a valid triple-unit
 /// shape) silently return `None` rather than surfacing an error.
-/// If your driver needs strict decode failure, walk the noun yourself.
+/// If your driver needs to tell an absent key from a bound atom-0
+/// value, or needs strict decode failure, use [`peek_unit_atom_strict`].
 pub fn unwrap_triple_unit_atom(result: &NounSlab) -> Option<Vec<u8>> {
     let space = result.noun_space();
     let maybe_value = strip_triple_unit_envelope(result)?;
@@ -238,6 +239,56 @@ pub fn peek_atom_u64_strict(
     }
     let value = unit.tail().as_atom().map_err(|_| PeekError::BadUnit)?;
     value.as_u64().map(Some).map_err(|_| PeekError::ValueTooLarge)
+}
+
+/// Byte-payload counterpart to [`peek_atom_u64_strict`].
+///
+/// AUDIT 2026-05-21 L-04: [`unwrap_triple_unit_atom`] cannot tell "path
+/// bound to atom 0" from "path didn't bind" — it trims both to an empty
+/// byte vec and collapses them onto `None`. When the absence carries
+/// security meaning, use this instead.
+///
+/// `unit_wraps` is the number of `[~ …]` envelope layers around the
+/// `(unit @)` payload (see [`peek_atom_u64_strict`]).
+///
+/// Returns:
+/// - `Ok(Some(bytes))` — the `(unit @)` held a value; trailing zeros are
+///   trimmed, so a bound atom-0 value yields `Ok(Some(vec![]))`.
+/// - `Ok(None)` — the `(unit @)` was `~`: path bound, key absent.
+/// - `Err(PeekError)` — the result was not a clean `[~ … [~ (unit @)]]`
+///   shape. [`PeekError::ValueTooLarge`] is never produced here — a byte
+///   payload has no width bound.
+pub fn peek_unit_atom_strict(
+    result: &NounSlab,
+    unit_wraps: usize,
+) -> Result<Option<Vec<u8>>, PeekError> {
+    let space = result.noun_space();
+    let mut handle = slab_root_noun(result).in_space(&space);
+
+    // Peel exactly `unit_wraps` `[~ inner]` envelope layers.
+    for _ in 0..unit_wraps {
+        let cell = handle.as_cell().map_err(|_| PeekError::BadWrapper)?;
+        let head = cell.head().as_atom().map_err(|_| PeekError::BadWrapper)?;
+        if !head.as_ne_bytes().iter().all(|&b| b == 0) {
+            return Err(PeekError::BadWrapper);
+        }
+        handle = cell.tail();
+    }
+
+    // `handle` is now the `(unit @)` slot: `~` (atom 0) or `[~ @]`.
+    if let Ok(atom) = handle.as_atom() {
+        if atom.as_ne_bytes().iter().all(|&b| b == 0) {
+            return Ok(None);
+        }
+        return Err(PeekError::BadUnit);
+    }
+    let unit = handle.as_cell().map_err(|_| PeekError::BadUnit)?;
+    let head = unit.head().as_atom().map_err(|_| PeekError::BadUnit)?;
+    if !head.as_ne_bytes().iter().all(|&b| b == 0) {
+        return Err(PeekError::BadUnit);
+    }
+    let value = unit.tail().as_atom().map_err(|_| PeekError::BadUnit)?;
+    Ok(Some(trim_trailing_zeros(value.as_ne_bytes()).to_vec()))
 }
 
 /// Decode a triple-unit peek result whose payload is `(unit (list T))`.

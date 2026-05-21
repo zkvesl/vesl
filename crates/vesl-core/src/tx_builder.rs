@@ -36,7 +36,10 @@ pub async fn kernel_sig_hash(
     let mut poke_slab: NounSlab = NounSlab::new();
     let tag = make_tas(&mut poke_slab, "sig-hash").as_noun();
     let seeds_atom = bytes_to_atom(&mut poke_slab, &seeds_jammed);
-    let fee_noun = D(fee.0 as u64);
+    // AUDIT 2026-05-21 L-01: route the fee through atom_from_u64 — a fee at
+    // or above 2^63 (DIRECT_MAX) would panic the bare `D()` direct-atom
+    // constructor. atom_from_u64 picks direct vs indirect atom by size.
+    let fee_noun = atom_from_u64(&mut poke_slab, fee.0 as u64);
     let cmd = T(&mut poke_slab, &[tag, seeds_atom, fee_noun]);
     poke_slab.set_root(cmd);
 
@@ -130,7 +133,7 @@ pub fn jam_spends_manual(spends: &Spends) -> anyhow::Result<bytes::Bytes> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-use nock_noun_rs::slab_root;
+use nock_noun_rs::{atom_from_u64, slab_root};
 
 /// Extract a Hash from a kernel effect of shape `[%expected_tag hash-noun]`.
 ///

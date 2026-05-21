@@ -61,6 +61,11 @@ pub enum SigningError {
     /// when no wallet seed phrase is configured — either no `[wallet]`
     /// block at all, or a `[wallet]` block without a `seed_phrase`.
     NoSeedPhrase,
+    /// Returned by [`pubkey_hash`] if `hash_noun_varlen_digest` rejects the
+    /// pubkey noun. Unreachable for a well-formed `SchnorrPubkey` — its noun
+    /// is a fixed cell of belts — but surfaced as a typed error rather than
+    /// an `.expect()` panic, for defence in depth. AUDIT 2026-05-21 L-02.
+    HashFailed(String),
 }
 
 impl fmt::Display for SigningError {
@@ -73,6 +78,7 @@ impl fmt::Display for SigningError {
             Self::InvalidMnemonic(msg) => write!(f, "invalid BIP-39 mnemonic: {msg}"),
             Self::DerivationFailure(msg) => write!(f, "BIP-44 derivation failed: {msg}"),
             Self::NoSeedPhrase => write!(f, "no wallet seed phrase configured"),
+            Self::HashFailed(msg) => write!(f, "pubkey hash failed: {msg}"),
         }
     }
 }
@@ -105,6 +111,9 @@ impl From<WalletError> for SigningError {
             WalletError::IndexOverflow(i) => {
                 Self::DerivationFailure(format!("hardened index {i} exceeds 31-bit limit"))
             }
+            WalletError::ScalarTooWide => Self::DerivationFailure(
+                "HD scalar exceeded the 32-byte transcript width".into(),
+            ),
             WalletError::Signing(inner) => Self::from(inner),
         }
     }
@@ -124,7 +133,7 @@ impl From<WalletError> for SigningError {
 pub fn derive_pubkey(sk: &[Belt; 8]) -> Result<SchnorrPubkey, SigningError> {
     let belts = nock_belts8_to_vesl(sk)?;
     let key = SchnorrPrivateKey::from_belts(&belts)?;
-    Ok(SchnorrPubkey(vesl_point_to_nock(&key.public_key())))
+    Ok(SchnorrPubkey(vesl_point_to_nock(&key.public_key()?)))
 }
 
 /// Compute the PKH (public-key hash) from a public key.
@@ -134,7 +143,7 @@ pub fn derive_pubkey(sk: &[Belt; 8]) -> Result<SchnorrPubkey, SigningError> {
 /// structure) through `hash_noun_varlen_digest`, NOT just the coordinate
 /// belts. Stays in vesl-core because vesl-signing does not carry the
 /// noun layer.
-pub fn pubkey_hash(pk: &SchnorrPubkey) -> Hash {
+pub fn pubkey_hash(pk: &SchnorrPubkey) -> Result<Hash, SigningError> {
     use nockapp::noun::slab::NounSlab;
     use nockchain_math::tip5::hash::hash_noun_varlen_digest;
     use nockvm::noun::NounAllocator;
@@ -143,9 +152,11 @@ pub fn pubkey_hash(pk: &SchnorrPubkey) -> Hash {
     let mut slab: NounSlab = NounSlab::new();
     let noun = pk.to_noun(&mut slab);
     let space = slab.noun_space();
+    // AUDIT 2026-05-21 L-02: a well-formed SchnorrPubkey noun never fails to
+    // hash, but return the error rather than `.expect()`-panic on it.
     let digest = hash_noun_varlen_digest(&mut slab, noun, &space)
-        .expect("hash_noun_varlen_digest should not fail on a valid SchnorrPubkey noun");
-    Hash::from_limbs(&digest)
+        .map_err(|e| SigningError::HashFailed(format!("{e:?}")))?;
+    Ok(Hash::from_limbs(&digest))
 }
 
 /// Return the canonical 97-byte serialization of a Schnorr public key.
@@ -450,7 +461,7 @@ mod tests {
         let mut sk = [Belt(0); 8];
         sk[0] = Belt(999);
         let pk = derive_pubkey(&sk).expect("test key derives");
-        let pkh = pubkey_hash(&pk);
+        let pkh = pubkey_hash(&pk).expect("pubkey hash succeeds for a valid key");
         assert!(pkh.0.iter().any(|b| b.0 != 0));
     }
 

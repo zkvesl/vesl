@@ -74,8 +74,10 @@ fn pubkey_hash_distinguishes_keys() {
     let sk1 = nonzero_key();
     let mut sk2 = nonzero_key();
     sk2[2] = Belt(99);
-    let pkh1 = pubkey_hash(&derive_pubkey(&sk1).expect("test key derives"));
-    let pkh2 = pubkey_hash(&derive_pubkey(&sk2).expect("test key derives"));
+    let pkh1 = pubkey_hash(&derive_pubkey(&sk1).expect("test key derives"))
+        .expect("pubkey hash succeeds");
+    let pkh2 = pubkey_hash(&derive_pubkey(&sk2).expect("test key derives"))
+        .expect("pubkey hash succeeds");
     assert_ne!(pkh1.0, pkh2.0);
 }
 

@@ -74,6 +74,14 @@ pub struct GraftPayload {
 /// pre-commit race where an attacker predicts a victim's note-id and
 /// settles a different manifest under it first. Implementations that
 /// don't care about note-id binding can simply ignore the argument.
+///
+/// AUDIT 2026-05-21 L-07: the trait carries no domain tag, so nothing at
+/// the type level stops a caller from wiring one domain's verifier into
+/// another domain's flow — `verify` would then answer about the wrong
+/// commitment rule, and a mismatched `data` / `expected_root` pair could
+/// read as a silent "verified". A caller composing `Settle<V>` MUST
+/// ensure `V` is the verifier for the domain the `data` bytes were
+/// produced under; the trait cannot enforce that wiring invariant.
 pub trait CommitmentVerifier: Send + Sync {
     fn verify(&self, note_id: u64, data: &[u8], expected_root: &Tip5Hash) -> bool;
     fn build_settle_poke(&self, payload: &GraftPayload) -> anyhow::Result<NounSlab>;

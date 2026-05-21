@@ -137,7 +137,12 @@ pub async fn fetch_receipt(
             ..
         } => (true, Some(block_id), Some(height), Some(timestamp)),
         TransactionBlockResult::Pending => (false, None, None, None),
-        TransactionBlockResult::NotFound => unreachable!("checked above"),
+        // AUDIT 2026-05-21 L-03: NotFound is filtered above; return the
+        // typed error instead of `unreachable!` so a future change to the
+        // upstream enum degrades to a clean error, not a panic.
+        TransactionBlockResult::NotFound => {
+            return Err(VerifyTxError::NotFound(tx_hash.to_string()))
+        }
     };
 
     let (fee, amount_total, inputs, outputs, timestamp_details) = match details {
@@ -147,7 +152,10 @@ pub async fn fetch_receipt(
             (d.fee, d.total_output, inputs, outputs, Some(d.timestamp))
         }
         TransactionDetailsResult::Pending => (None, None, Vec::new(), Vec::new(), None),
-        TransactionDetailsResult::NotFound => unreachable!("checked above"),
+        // AUDIT 2026-05-21 L-03: see the block match above.
+        TransactionDetailsResult::NotFound => {
+            return Err(VerifyTxError::NotFound(tx_hash.to_string()))
+        }
     };
 
     let primary_lock_summary = if outputs.len() == 1 {
