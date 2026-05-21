@@ -40,8 +40,15 @@ impl Mint {
 
     /// Commit a set of data chunks. Returns the Merkle root.
     /// Builds the tree internally and stores it for later proof generation.
+    ///
+    /// Panics if `data` is empty — committing zero chunks has no
+    /// meaningful root. A caller handling untrusted input should check
+    /// `!data.is_empty()` first, or use
+    /// [`nockchain_tip5_rs::MerkleTree::build`] directly, which returns a
+    /// typed [`nockchain_tip5_rs::MerkleTreeError`].
     pub fn commit(&mut self, data: &[&[u8]]) -> Tip5Hash {
-        let tree = MerkleTree::build(data);
+        let tree = MerkleTree::build(data)
+            .expect("Mint::commit requires a non-empty data set");
         let root = tree.root();
         self.leaf_count = data.len();
         self.tree = Some(tree);
@@ -57,7 +64,12 @@ impl Mint {
                 leaf_count: self.leaf_count,
             });
         }
-        Ok(tree.proof(index))
+        // The index is bounds-checked above, so MerkleTree::proof cannot
+        // fail here; map its (unreachable) error back to MintError anyway.
+        tree.proof(index).map_err(|_| MintError::IndexOutOfRange {
+            index,
+            leaf_count: self.leaf_count,
+        })
     }
 
     /// Get the current root, or None if nothing committed yet.
