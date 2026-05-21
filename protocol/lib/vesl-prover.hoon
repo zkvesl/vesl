@@ -15,6 +15,7 @@
 ::  Formula is a hand-crafted Nock 0-8 expression embedded in the
 ::  subject for self-reference via Nock 2 recursion.
 ::
+/+  *vesl-lower
 /=  compute-table-v2  /common/v2/table/prover/compute
 /=  memory-table-v2  /common/v2/table/prover/memory
 /=  nock-common-v2  /common/v2/nock-common
@@ -51,6 +52,12 @@
 ++  prove-computation
   |=  [subject=* formula=* root=@ hull=@]
   ^-  prove-result:stark-prover
+  ::  AUDIT 2026-05-20 M-07: lower the formula to the Nock 0-8 subset
+  ::  before tracing — fink:fock crashes on opcodes 9/10/11.  The proof
+  ::  tuple below carries the lowered formula so the verifier's
+  ::  build-tree-data sees the same [subject formula] that was traced.
+  ::
+  =/  formula  (lower formula)
   ::  1. trace the nock execution
   ::
   =/  [prod=* return=fock-return]
