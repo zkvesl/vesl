@@ -263,7 +263,11 @@ pub fn verify_proof(leaf_data: &[u8], proof: &[ProofNode], expected_root: &Tip5H
         };
     }
 
-    // Constant-time comparison to prevent timing side-channels
+    // AUDIT 2026-05-20 M-19: the final digest compare below is constant-time
+    // over the digest bytes — but the hash_pair recompute loop above is NOT
+    // (it branches on node.side). Merkle proof contents are public, so that
+    // is acceptable; ct_eq here only avoids leaking expected_root through
+    // compare timing. This does not make verify_proof constant-time overall.
     let cur_bytes: Vec<u8> = cur.iter().flat_map(|x| x.to_le_bytes()).collect();
     let exp_bytes: Vec<u8> = expected_root.iter().flat_map(|x| x.to_le_bytes()).collect();
     cur_bytes.ct_eq(&exp_bytes).into()
