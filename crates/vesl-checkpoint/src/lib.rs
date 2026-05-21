@@ -185,12 +185,15 @@ pub async fn snapshot(
 /// every graft past the first added priority band; that mode no longer
 /// ships. v0.2 resets per-graft state to type defaults on every
 /// resume; operators needing data preservation re-poke after resume.
+/// `resume` accepts that reset silently — for a loud failure instead,
+/// use [`resume_with_data_dir`] with `strict_state_change = true`
+/// (AUDIT 2026-05-20 M-26).
 pub async fn resume(
     jam_path: &Path,
     snapshot: &Snapshot,
     name: &str,
 ) -> Result<NockApp> {
-    resume_with_data_dir(jam_path, snapshot, name, None, None).await
+    resume_with_data_dir(jam_path, snapshot, name, None, None, false).await
 }
 
 /// Resume with an explicit `data_dir` for the rebooted app.
@@ -205,26 +208,55 @@ pub async fn resume(
 /// verify it hashes to the snapshot's recorded SHA-256. A mismatch is logged
 /// as a warning — composition changes are expected — and `None` skips the
 /// check entirely (AUDIT 2026-05-19 H-20).
+///
+/// `strict_state_change`: when `true`, a `source_app_hoon` mismatch is a
+/// hard error instead of a warning (AUDIT 2026-05-20 M-26). A kernel
+/// rebuilt since the snapshot resets per-graft state to type defaults on
+/// resume; strict mode turns that silent data loss into a loud failure an
+/// operator must consciously override. Requires `source_app_hoon` — with
+/// nothing to hash against the snapshot, the call errors. A CLI driving
+/// resume surfaces this as `--strict-state-change`.
 pub async fn resume_with_data_dir(
     jam_path: &Path,
     snapshot: &Snapshot,
     name: &str,
     data_dir: Option<PathBuf>,
     source_app_hoon: Option<&Path>,
+    strict_state_change: bool,
 ) -> Result<NockApp> {
     let kernel_bytes = tokio::fs::read(jam_path)
         .await
         .with_context(|| format!("read kernel jam at {}", jam_path.display()))?;
 
-    // AUDIT 2026-05-19 H-20: if the caller supplies the new kernel's
-    // source, verify it hashes to the snapshot's recorded SHA-256. A
-    // mismatch is a warning, not an error — resuming across a
-    // composition change is a supported, common operation.
+    // AUDIT 2026-05-19 H-20 / 2026-05-20 M-26: if the caller supplies the
+    // new kernel's source, hash it against the snapshot's recorded
+    // SHA-256. A mismatch means the kernel was recompiled since the
+    // snapshot, so the resume resets per-graft state to type defaults
+    // (see `resume`). Lenient mode warns and proceeds; strict mode
+    // refuses, so an operator who did not expect a schema change gets a
+    // loud failure instead of silent data loss.
+    if strict_state_change && source_app_hoon.is_none() {
+        return Err(anyhow!(
+            "strict-state-change resume needs the new kernel's Hoon \
+             source to compare against the snapshot — pass it as \
+             `source_app_hoon`"
+        ));
+    }
     if let Some(src) = source_app_hoon {
         let current = sha256_of_file(src)
             .await
             .with_context(|| format!("hash {}", src.display()))?;
         if current != snapshot.source_sha256 {
+            if strict_state_change {
+                return Err(anyhow!(
+                    "strict-state-change resume refused: kernel source \
+                     SHA-256 {current} differs from snapshot {} — the \
+                     kernel was rebuilt, so resuming would reset per-graft \
+                     state to type defaults. Resume without strict mode to \
+                     proceed anyway.",
+                    snapshot.source_sha256
+                ));
+            }
             eprintln!(
                 "  warn: resume kernel source SHA-256 {current} differs \
                  from snapshot {} — resuming across a composition change",

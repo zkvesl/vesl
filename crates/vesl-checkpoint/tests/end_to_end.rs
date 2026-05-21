@@ -90,10 +90,31 @@ async fn snapshot_then_resume_round_trip() -> Result<()> {
         "vesl-checkpoint-test-resumed",
         Some(resume_dir.path().to_path_buf()),
         Some(&app_hoon),
+        false,
     )
     .await?;
     // Resume returning Ok is the contract this test asserts; state
     // contents are the vesl-nockup-side test's job.
+
+    // AUDIT 2026-05-20 M-26: strict mode refuses a resume whose kernel
+    // source no longer matches the snapshot — a schema change would
+    // otherwise silently reset per-graft state. `source_app_hoon` here
+    // points at a file whose sha differs from the snapshot's source.
+    let stale_source = resume_dir.path().join("stale-source.hoon");
+    tokio::fs::write(&stale_source, b"not the snapshot's kernel source").await?;
+    let strict = resume_with_data_dir(
+        &kernel_path,
+        &snap,
+        "vesl-checkpoint-test-strict",
+        None,
+        Some(&stale_source),
+        true,
+    )
+    .await;
+    assert!(
+        strict.is_err(),
+        "strict-state-change resume must refuse a kernel-source mismatch",
+    );
 
     Ok(())
 }
