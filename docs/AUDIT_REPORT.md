@@ -9,6 +9,10 @@
 > This banner and the §2 per-finding banners supersede the "NOT READY FOR BETA" verdict in
 > §1 and items 1–9 of §9 with respect to the Critical findings. The **22 High findings are
 > likewise remediated** as of 2026-05-20 — see the per-finding banners in §3.
+>
+> **Update 2026-05-21.** The **28 Low / Informational findings (§5) are resolved or
+> dispositioned**: 22 fixed; 6 (L-06, L-08, L-14, L-15, L-17, L-18) assessed not-a-bug,
+> with the rationale in each per-finding banner.
 
 **Scope.** Adversarial whitebox audit of the three repositories that ship together for the Vesl beta release:
 
@@ -1098,113 +1102,169 @@ Local mode sets timeout to 0. A misrouted `submit_and_wait` returns immediately.
 
 ### L-01 — `tx_builder.rs:34` `D(fee.0 as u64)` panics if fee exceeds `DIRECT_MAX`
 
+> **RESOLVED — 2026-05-21 (`b8d86ef`).** `kernel_sig_hash` builds the fee atom via `atom_from_u64`, not `D()` — a fee at or above 2^63 no longer panics the direct-atom constructor.
+
 vesl-core. Practically near-zero risk (fee comes from config, default 256), but the panic is reachable. Use `atom_from_u64`.
 
 ### L-02 — `signing.rs:124, 144` use `.expect(...)` in `derive_pubkey` and `pubkey_hash`
+
+> **RESOLVED — 2026-05-21 (`b8d86ef`).** `pubkey_hash` returns `Result<Hash, SigningError::HashFailed>` instead of `.expect()`-panicking on a `hash_noun_varlen_digest` error; `derive_pubkey` was already `Result` (H-04).
 
 vesl-core. Documented invariants; callers must range-check inputs. Could be `Result`-returning.
 
 ### L-03 — `verify_tx.rs:140, 150` use `unreachable!()` on enum branches assumed eliminated upstream
 
+> **RESOLVED — 2026-05-21 (`b8d86ef`).** The two `unreachable!()` arms in `fetch_receipt` now return a typed `VerifyTxError::NotFound` — an upstream enum refactor degrades to a clean error, not a panic.
+
 vesl-core. Fragile if upstream code refactors.
 
 ### L-04 — `peek.rs:99-100` `unwrap_triple_unit_atom` collapses absent/zero in byte-vec path
+
+> **RESOLVED — 2026-05-21 (`b8d86ef`).** Added `peek_unit_atom_strict` — a byte-payload twin of `peek_atom_u64_strict` that distinguishes an absent path (`Ok(None)`) from a bound atom-0 value (`Ok(Some(vec![]))`). `unwrap_triple_unit_atom` is kept for non-security callers.
 
 vesl-core. Same trap as M-20 for the byte path.
 
 ### L-05 — `Settle::poke_bytes` no upper bound on payload size
 
+> **RESOLVED — 2026-05-21 (`b8d86ef`).** `Settle::poke_bytes` bounds `payload.data` at `MAX_POKE_DATA_BYTES` (64 MiB) before building the poke.
+
 vesl-core. Memory amplification when paired with H-06.
 
 ### L-06 — No zeroization for `Mint::tree` / `Guard::roots`
+
+> **OPEN — assessed not-a-bug (2026-05-21).** `Guard::roots` / `Mint::tree` hold Merkle roots and leaf hashes — public commitment data, posted on-chain by design. There is no secret to zeroize; `ZeroizeOnDrop` would add a dependency and `Drop` glue for zero security gain. No change.
 
 vesl-core. Defense-in-depth; not a primary vector. Add `ZeroizeOnDrop`.
 
 ### L-07 — `CommitmentVerifier` lacks domain tag
 
+> **RESOLVED — 2026-05-21 (`b8d86ef`).** The `CommitmentVerifier` rustdoc documents the no-domain-tag footgun (a verifier wired to the wrong domain reads as a silent "verified"). A required `domain_tag()` method was rejected — it would break hull-llm's `RagVerifier` for an L-tier informational finding.
+
 vesl-core. A caller wiring `RagVerifier` against a non-RAG flow gets silent "verified" answer.
 
 ### L-08 — `vesl-stark-verifier.hoon:510` `&(=(test-mode %.n) !(verify-merk-proofs ...))` is logic-readable but fragile
+
+> **OPEN — assessed not-a-bug (2026-05-21).** The `=(test-mode %.n)` conjunct is deliberate defense-in-depth: C-02's `?>` asserts sit on the outer `+verify` / `+verify-settlement` gates only, while the `verify-door` arm has its own `=|  test-mode=_|` with no assert. The conjunct is the sole `test-mode` gate on the door-direct call path — removing it would weaken that path. No change.
 
 vesl-core. Single-character refactor away from disaster. After C-02 lands, simplify.
 
 ### L-09 — `guard-graft.hoon:117-123` peek returns `(unit (unit (unit @)))` — three-level unwrap
 
+> **RESOLVED — 2026-05-21 (`bc21275`).** `guard-peek`'s doc now explains the triple-nested `[~ [~ (unit @)]]` return shape. Doc-only — the type is correct, not a bug.
+
 vesl-core. API shape footgun.
 
 ### L-10 — `kv-graft.hoon` `%kv-delete` is idempotent; `registry-graft` `%registry-del` errors on missing
+
+> **RESOLVED — 2026-05-21 (`bc21275`).** `%kv-delete` and `%registry-del` each now document the deliberate contrast (idempotent vs strict) and warn composers not to assume one delete convention covers the other.
 
 vesl-core. Composer trap — different semantics between graft families.
 
 ### L-11 — `forge-graft.hoon` is stateless and does NOT check registered roots
 
+> **RESOLVED — 2026-05-21 (`bc21275`).** `forge-poke`'s doc states forge is stateless and does not check registered roots; pair it with a stateful graft for registration enforcement. Doc-only — a stateless graft cannot hold a roots set.
+
 vesl-core. Documented; composer must pair with stateful graft. Worth a runtime guard.
 
 ### L-12 — `validate-graft.hoon` `%non-empty` rule treats `body=~` as empty but accepts `[~ ~]`
+
+> **RESOLVED — 2026-05-21 (`bc21275`).** The `%non-empty` rule now documents that it rejects only the nil noun `~`; any cell (incl. `[~ ~]`) is a non-empty body, and a content-shaped rule needs its own arm.
 
 vesl-core. Rule semantics loose. Future "length" / "in-set" rules will amplify.
 
 ### L-13 — `vesl-gates.hoon:138-156` catalog "shorthand" comment hints at unimplemented `proof=@` path
 
+> **RESOLVED — 2026-05-21 (`bc21275`).** The stale `vesl-gates` comment is reworded — there is no `proof=@` shorthand; the gate takes the typed sibling-list, callers `cue` at the edge.
+
 vesl-core. Docs drift; not exploitable.
 
 ### L-14 — `vesl-mint.hoon` is a no-op re-export shell
+
+> **OPEN — assessed not-a-bug (2026-05-21).** `vesl-mint.hoon` is an intentional API layer (the Mint tier — a `/+  *vesl-merkle` re-export); the file's own header documents this. Not a placeholder to remove. No change.
 
 vesl-core. Cosmetic / documentation. The `/+  *vesl-merkle` chain transitively exposes arms but the file reads as a placeholder.
 
 ### L-15 — `verify-chunk` allows depth-0 proofs against any chunk if root = hash-leaf(chunk)
 
+> **OPEN — assessed not-a-bug (2026-05-21).** A depth-0 proof is correct for a single-leaf tree (`root == hash-leaf(chunk)`). The pollution surface this widened was H-02 (arbitrary roots), now RESOLVED. Rejecting depth-0 would also force a guard/settle/forge JAM regen for a non-bug. No change.
+
 vesl-core. Mathematically correct for single-leaf trees. Combined with H-02 (arbitrary roots) widens pollution surface.
 
 ### L-16 — `verifier-eny` has no derivation guidance; tests pass `0`
+
+> **RESOLVED — 2026-05-21 (`bc21275`).** `vesl-stark-verifier` now documents `verifier-eny` — it seeds the DDoS-resistant Merkle-opening check order; production callers must pass real entropy, `0` (test-only) makes the order deterministic.
 
 vesl-core. With `eny=0`, Merkle-proof ordering is deterministic; the DDOS-resistance guard is lost.
 
 ### L-17 — `build-fs-formula` is hardcoded with no version tag
 
+> **OPEN — assessed not-a-bug (2026-05-21).** The proof envelope already carries a `%2` version tag the verifier asserts (`?>  ?=(%2 version.proof)`); the formula is intentionally hardcoded to the safe Nock 0-8 subset post-M-07. No separate formula version tag is needed at this layer. No change.
+
 vesl-core. Already C-lead-1; flagged for FS-transcript inclusion when the formula stops being hardcoded.
 
 ### L-18 — `kernel-arms.hoon:31-39` `parse-payload` collapses cue + sieve failures
+
+> **OPEN — assessed not-a-bug (2026-05-21).** The cited `parse-payload` arm does not exist in current `kernel-arms.hoon`. The per-kernel `cue` + `;;` sieve is `mule`-wrapped and already emits typed `%settle-error` / `%prove-error` effects (H-03). Distinguishing a cue failure from a sieve failure is cosmetic — not worth a kernel JAM regen. No change.
 
 vesl-core. Diagnostic gap.
 
 ### L-19 — `wait_for_acceptance` prints errors to stderr, doesn't propagate
 
+> **RESOLVED — 2026-05-21 (`105d595`).** `wait_for_acceptance` logs a retryable `check_accepted` error via `tracing::warn!` instead of `eprintln!`.
+
 vesl-core. UX trap; convert to `tracing::warn!`.
 
 ### L-20 — `WalletClient::pid_counter: i32` wraps after 2^31 - 1 calls
+
+> **RESOLVED — 2026-05-21 (`105d595`).** `WalletClient::pid_counter` is `u32`, not `i32` — `next_pid` cycles the full 2^32 range cleanly instead of `wrapping_add`-ing into negatives with an ad-hoc reset.
 
 vesl-core. Long-running daemon collision. Use `u64`.
 
 ### L-21 — `MerkleTree::build` panics on empty leaves; `proof()` panics OOB
 
+> **RESOLVED — 2026-05-21 (`911b883`).** `MerkleTree::build` / `MerkleTree::proof` return `Result<_, MerkleTreeError>` instead of asserting. `Mint::commit` keeps `-> Tip5Hash` with a documented empty-data precondition; `Mint::proof` is unchanged (already `Result`).
+
 vesl-core. Documented preconditions.
 
 ### L-22 — `tip5_to_atom_le_bytes` returns `vec![0]` for all-zero digest, not `vec![]`
+
+> **RESOLVED — 2026-05-21 (`911b883`).** `tip5_to_atom_le_bytes` returns `vec![]` for an all-zero digest — the canonical little-endian encoding of atom 0.
 
 vesl-core. Convention mismatch. Either return `vec![]` or document the non-empty representation.
 
 ### L-23 — `ubig_to_be_32` panics on `n >= 2^256`
 
+> **RESOLVED — 2026-05-21 (vesl-wallet `2eb0525`).** `ubig_to_be_32` returns `Result<_, WalletError::ScalarTooWide>` rather than panicking `copy_from_slice` on a scalar wider than 32 bytes.
+
 vesl-wallet. Today only called with G_ORDER-bounded scalars; defensive.
 
 ### L-24 — `bs58::decode` allocates unbounded for malicious input
+
+> **RESOLVED — 2026-05-21 (vesl-wallet `2eb0525`).** `CheetahPoint::from_base58` rejects an over-`MAX_B58_LEN` (256) string before `bs58::decode` allocates.
 
 vesl-wallet. Cap at `MAX_B58_LEN` before decode.
 
 ### L-25 — `CheetahPoint::in_curve` panics rather than returning false on `ch_scal_big` error
 
+> **RESOLVED — 2026-05-21 (vesl-wallet `2eb0525`).** `CheetahPoint::in_curve` treats a `ch_scal_big` error as "not on curve" instead of `.expect()`-panicking on an attacker-supplied point.
+
 vesl-wallet. Edge-case off-curve points cause `in_curve()` to crash instead of cleanly rejecting.
 
 ### L-26 — `SchnorrPrivateKey::public_key` panics on "healthy curve" assumption
+
+> **RESOLVED — 2026-05-21 (vesl-wallet `2eb0525`).** `SchnorrPrivateKey::public_key` returns `Result<CheetahPoint, SchnorrError>`; `SiwnSigner::new` and the derive/sign call sites propagate it.
 
 vesl-wallet. Brittle if curve constants change.
 
 ### L-27 — `t8_to_scalar` error type leaks chunk content
 
+> **RESOLVED — 2026-05-21 (vesl-wallet `2eb0525`).** `SchnorrError::BadChunk` carries the chunk index (`usize`), not the raw chunk string — no caller content lands in the error.
+
 vesl-wallet. Use `BadChunk(usize)` (index) not `BadChunk(String)`.
 
 ### L-28 — `.sync-pins.toml` documented "auto-generated" but committed as if canonical
+
+> **RESOLVED — 2026-05-21 (vesl-nockup `38bdfa5`).** `sync.sh`'s `.sync-pins.toml` heredoc header is reworded — the file is stated as generated-and-committed-on-purpose (the synced-pin record + CI drift input), not a throwaway "auto-generated" file.
 
 vesl-nockup. Reviewer confusion.
 
@@ -1296,7 +1356,7 @@ After 1-9:
 15. **H-19, H-20, H-21, H-22** — Template build.rs PATH-RCE, checkpoint resume verification, Dockerfile alignment, CI nockchain checkout.
 16. **CC-03, CC-04** — cargo-deny in CI, release-mode boundary fuzz suite.
 17. Medium tier — schedule for v0.2 / first post-beta point release.
-18. Low / informational — opportunistic cleanup.
+18. Low / informational — **resolved or dispositioned 2026-05-21**; see the §5 per-finding banners (22 fixed, 6 assessed not-a-bug).
 
 The math holds. The kernel state machine is conservative where it shipped fixes. The Schnorr layer is mostly sound. **What needs work is the gap between what the audits documented and what the code actually does.** A startling number of prior-cycle items are documented-fixed but code-unfixed. Closing that gap is what beta-readiness looks like.
 
