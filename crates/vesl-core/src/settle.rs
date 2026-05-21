@@ -163,12 +163,17 @@ pub fn build_seeds(
         "fee ({fee}) exceeds 50% of input amount ({amount})"
     );
     let output_amount = amount.saturating_sub(fee);
+    // AUDIT 2026-05-20 M-22: u64 -> usize is lossless on 64-bit but
+    // truncates on a 32-bit target (e.g. wasm32). Convert explicitly so an
+    // overflow surfaces as an error, not a silently wrong gift amount.
+    let gift_nicks = usize::try_from(output_amount)
+        .map_err(|_| anyhow::anyhow!("output amount {output_amount} exceeds usize"))?;
     use nockchain_types::tx_engine::v1::tx::Seed;
     let seed = Seed {
         output_source: None,
         lock_root,
         note_data,
-        gift: nockchain_types::tx_engine::common::Nicks(output_amount as usize),
+        gift: nockchain_types::tx_engine::common::Nicks(gift_nicks),
         parent_hash,
     };
     Ok(nockchain_types::tx_engine::v1::tx::Seeds(vec![seed]))
