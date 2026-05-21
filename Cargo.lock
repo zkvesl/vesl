@@ -3855,6 +3855,7 @@ dependencies = [
  "noun-serde",
  "tokio",
  "tonic 0.14.5",
+ "tracing",
 ]
 
 [[package]]

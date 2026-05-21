@@ -158,7 +158,9 @@ impl ChainClient {
                 Ok(true) => return Ok(true),
                 Ok(false) => {}
                 Err(e) => {
-                    eprintln!("  warn: check_accepted error (will retry): {}", e);
+                    // AUDIT 2026-05-21 L-19: structured warning, not a raw
+                    // stderr print, so the retry surfaces to log filters.
+                    tracing::warn!("check_accepted error (will retry): {e}");
                 }
             }
 

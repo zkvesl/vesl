@@ -88,7 +88,7 @@ impl std::fmt::Display for WalletBalance {
 pub struct WalletClient {
     client: nockapp_grpc::private_nockapp::PrivateNockAppGrpcClient,
     config: WalletConfig,
-    pid_counter: i32,
+    pid_counter: u32,
 }
 
 impl WalletClient {
@@ -111,10 +111,17 @@ impl WalletClient {
         })
     }
 
+    /// Monotonic request id for gRPC peek/poke correlation.
+    ///
+    /// AUDIT 2026-05-21 L-20: the counter is `u32`, not `i32`, so it
+    /// cycles the full 2^32 range cleanly instead of `wrapping_add`-ing
+    /// into negative values that the old code patched with an ad-hoc
+    /// reset. The gRPC `pid` field is int32, so the reinterpret cast is
+    /// the wire encoding — a negative correlation id is a valid distinct
+    /// value (it indexes nothing; the wallet only matches on it).
     fn next_pid(&mut self) -> i32 {
         self.pid_counter = self.pid_counter.wrapping_add(1);
-        if self.pid_counter < 0 { self.pid_counter = 1; }
-        self.pid_counter
+        self.pid_counter as i32
     }
 
     /// Check if the wallet is running and responsive.
