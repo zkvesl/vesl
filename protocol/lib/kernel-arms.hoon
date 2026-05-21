@@ -85,6 +85,13 @@
       [%.n %note-root-mismatch]
     ~>  %slog.[3 (rap 3 ~[label ' note root does not match expected root'])]
     [%.n %note-root-mismatch]
+  ::  AUDIT 2026-05-20 M-08: %verify mode returns here, BEFORE the
+  ::  replay check below.  A %verify result of [%.y ~] therefore means
+  ::  only "registered, roots match" — it is NOT a settle-safety
+  ::  guarantee: an already-settled note still yields [%.y ~] under
+  ::  %verify.  A caller using %verify as a "can I settle this?"
+  ::  preflight must treat replay rejection as a %mutate-time outcome.
+  ::
   ?.  ?=(%mutate mode)
     [%.y ~]
   ?:  (~(has in settled) id.note)
