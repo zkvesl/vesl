@@ -380,28 +380,73 @@ pub fn effect_head_tags(effects: &[NounSlab]) -> Vec<String> {
     effects.iter().filter_map(effect_head_tag).collect()
 }
 
-/// Decode the `msg=@t` cord from a `[%settle-error msg=@t]` effect.
+/// Decode the tail atom of a `[<tag> <atom>]` effect as a cord string.
 ///
-/// Returns `Some(cord)` when the effect is shaped `[%settle-error <atom>]`
-/// — the kernel's typed-rejection shape for settle-graft (see
-/// `protocol/lib/settle-graft.hoon`'s `+$ settle-effect`). Returns `None`
-/// for any other shape: wrong head tag, atom-only effect, or a cell-tailed
-/// effect.
+/// Effect-side counterpart to the peek-side [`unwrap_triple_unit_atom`]
+/// (which strips the peek's `[~ [~ ...]]` envelope). Effects carry their
+/// payload directly in the tail — no envelope to strip — so this decoder
+/// is one cell-split away from the atom bytes.
 ///
-/// The cord is decoded with the same `trim_trailing_zeros` +
+/// Returns `None` when the effect is not a `[<head> <atom>]` cell (bare
+/// atom, cell-headed effect, cell-tailed effect). The head tag is NOT
+/// checked — callers that need head-tag verification should call
+/// [`effect_head_tag`] first and gate this call on the result, the same
+/// way [`decode_settle_error`] does.
+///
+/// Used as the universal cord decoder for `%<graft>-error msg=@t`,
+/// `%<graft>-denied reason=@t`, and any other typed-cord effect tail. The
+/// decode follows the same `trim_trailing_zeros` +
 /// `String::from_utf8_lossy` convention as [`effect_head_tag`], so the
 /// function never returns `None` purely on byte-encoding noise — only when
 /// the effect's *shape* prevents a cord from being read.
+pub fn decode_effect_cord(effect: &NounSlab) -> Option<String> {
+    let root = slab_root_noun(effect);
+    let space = effect.noun_space();
+    let cell = root.in_space(&space).as_cell().ok()?;
+    let atom = cell.tail().as_atom().ok()?;
+    let trimmed = trim_trailing_zeros(atom.as_ne_bytes());
+    Some(String::from_utf8_lossy(trimmed).into_owned())
+}
+
+/// Effect-side counterpart to [`peek_loobean`].
+///
+/// Effect tails are not wrapped in `[~ [~ ...]]` — the loobean lives
+/// directly as the tail atom of a `[<tag> ?]` effect (e.g.
+/// `[%settle-verified ?]`). Returns:
+///
+/// - `Some(true)` if the tail atom is `0` (`%.y`).
+/// - `Some(false)` if the tail atom is `1` (`%.n`).
+/// - `None` if the effect is not a `[<head> <atom>]` cell, or the tail
+///   atom is neither 0 nor 1.
+///
+/// Use this in preference to a hand-rolled tail decode whenever a graft
+/// emits `[%<tag> ?]`. The head tag is NOT checked; callers that need
+/// head-tag verification should call [`effect_head_tag`] first.
+pub fn decode_effect_loobean(effect: &NounSlab) -> Option<bool> {
+    let root = slab_root_noun(effect);
+    let space = effect.noun_space();
+    let cell = root.in_space(&space).as_cell().ok()?;
+    let atom = cell.tail().as_atom().ok()?;
+    match trim_trailing_zeros(atom.as_ne_bytes()) {
+        [] => Some(true),    // atom 0 = %.y
+        [1] => Some(false),  // atom 1 = %.n
+        _ => None,
+    }
+}
+
+/// Decode the `msg=@t` cord from a `[%settle-error msg=@t]` effect.
+///
+/// Tag-gated thin wrapper over [`decode_effect_cord`]. Returns `Some(cord)`
+/// when the effect is shaped `[%settle-error <atom>]` — the kernel's
+/// typed-rejection shape for settle-graft (see
+/// `protocol/lib/settle-graft.hoon`'s `+$ settle-effect`). Returns `None`
+/// for any other shape: wrong head tag, atom-only effect, or a cell-tailed
+/// effect.
 pub fn decode_settle_error(effect: &NounSlab) -> Option<String> {
     if effect_head_tag(effect).as_deref() != Some("settle-error") {
         return None;
     }
-    let root = slab_root_noun(effect);
-    let space = effect.noun_space();
-    let cell = root.in_space(&space).as_cell().ok()?;
-    let msg_atom = cell.tail().as_atom().ok()?;
-    let trimmed = trim_trailing_zeros(msg_atom.as_ne_bytes());
-    Some(String::from_utf8_lossy(trimmed).into_owned())
+    decode_effect_cord(effect)
 }
 
 /// Decode a `%queue-popped` effect into `(id, body_bytes)`.
@@ -861,5 +906,87 @@ mod tests {
         let mut slab: NounSlab = NounSlab::new();
         slab.set_root(D(42));
         assert_eq!(decode_settle_error(&slab), None);
+    }
+
+    // ---- decode_effect_cord ----
+
+    #[test]
+    fn decode_effect_cord_extracts_tail_atom_regardless_of_head_tag() {
+        // [%counter-error 'counter at saturation'] — same shape as
+        // %settle-error, different head tag. decode_effect_cord is
+        // tag-agnostic and must extract the cord.
+        let mut slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut slab, "counter-error");
+        let msg = nock_noun_rs::make_atom_in(&mut slab, b"counter at saturation");
+        let effect = T(&mut slab, &[tag, msg]);
+        slab.set_root(effect);
+        assert_eq!(
+            decode_effect_cord(&slab).as_deref(),
+            Some("counter at saturation"),
+        );
+    }
+
+    #[test]
+    fn decode_effect_cord_returns_none_for_atom_only_effect() {
+        let mut slab: NounSlab = NounSlab::new();
+        slab.set_root(D(7));
+        assert_eq!(decode_effect_cord(&slab), None);
+    }
+
+    #[test]
+    fn decode_effect_cord_returns_none_for_cell_tailed_effect() {
+        // [%bad [a b]] — tail is a cell, not an atom.
+        let mut slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut slab, "bad");
+        let tail = T(&mut slab, &[D(1), D(2)]);
+        let effect = T(&mut slab, &[tag, tail]);
+        slab.set_root(effect);
+        assert_eq!(decode_effect_cord(&slab), None);
+    }
+
+    // ---- decode_effect_loobean ----
+
+    #[test]
+    fn decode_effect_loobean_decodes_true_and_false() {
+        // [%settle-verified 0] → %.y → Some(true)
+        let mut yes: NounSlab = NounSlab::new();
+        let ytag = make_tag_in(&mut yes, "settle-verified");
+        let yeff = T(&mut yes, &[ytag, D(0)]);
+        yes.set_root(yeff);
+        assert_eq!(decode_effect_loobean(&yes), Some(true));
+
+        // [%settle-verified 1] → %.n → Some(false)
+        let mut no: NounSlab = NounSlab::new();
+        let ntag = make_tag_in(&mut no, "settle-verified");
+        let neff = T(&mut no, &[ntag, D(1)]);
+        no.set_root(neff);
+        assert_eq!(decode_effect_loobean(&no), Some(false));
+    }
+
+    #[test]
+    fn decode_effect_loobean_returns_none_for_non_loobean_tail() {
+        // [%settle-verified 42] — tail isn't 0 or 1.
+        let mut slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut slab, "settle-verified");
+        let effect = T(&mut slab, &[tag, D(42)]);
+        slab.set_root(effect);
+        assert_eq!(decode_effect_loobean(&slab), None);
+    }
+
+    #[test]
+    fn decode_effect_loobean_returns_none_for_atom_only_effect() {
+        let mut slab: NounSlab = NounSlab::new();
+        slab.set_root(D(0));
+        assert_eq!(decode_effect_loobean(&slab), None);
+    }
+
+    #[test]
+    fn decode_effect_loobean_returns_none_for_cell_tailed_effect() {
+        let mut slab: NounSlab = NounSlab::new();
+        let tag = make_tag_in(&mut slab, "settle-verified");
+        let tail = T(&mut slab, &[D(0), D(0)]);
+        let effect = T(&mut slab, &[tag, tail]);
+        slab.set_root(effect);
+        assert_eq!(decode_effect_loobean(&slab), None);
     }
 }

@@ -18,6 +18,7 @@ pub mod guard;
 pub mod mint;
 pub mod graft_pokes;
 pub mod peek;
+pub mod poke;
 pub mod signing;
 pub mod types;
 pub mod verify_tx;
@@ -118,6 +119,11 @@ pub use nock_noun_rs::{rejam_atom, RejamError};
 // zkvesl-docs `reference/sdk.md` "Peek calls from Rust" for usage.
 pub use peek::{
     build_hull_peek_path, build_keyed_peek_path, build_keyless_peek_path,
-    decode_queue_popped, decode_settle_error, effect_head_tag, effect_head_tags, peek_atom_u64,
-    peek_loobean, peek_unit_list, unwrap_triple_unit_atom,
+    decode_effect_cord, decode_effect_loobean, decode_queue_popped, decode_settle_error,
+    effect_head_tag, effect_head_tags, peek_atom_u64, peek_loobean, peek_unit_list,
+    unwrap_triple_unit_atom,
 };
+
+// Typed `NockApp::poke` outcome. See `crates/vesl-core/src/poke.rs` for
+// the design rationale.
+pub use poke::{classify_effects, PokeCrashError, PokeOutcome, RejectionReason};
