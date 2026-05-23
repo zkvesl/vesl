@@ -123,6 +123,7 @@
       [%settle-epoch-rotated old-epoch=@ new-epoch=@]
       [%settle-error msg=@t]
       [%settle-register-rejected hull=@ existing-root=@]
+      [%settle-denied reason=@t]
   ==
 ::
 ::  +$settle-cause: tagged pokes the Graft handles
@@ -205,12 +206,18 @@
     ?:  (~(has in prior-settled.state) id.note.args)
       :_  state
       ~[[%settle-error 'settle-graft: note already settled (prior epoch)']]
-    ::  AUDIT 2026-04-19 M-11: mule-wrap the gate call too. The gate
-    ::  may `;;(domain-type data)` internally — a crafted `data` subtree
-    ::  otherwise panics the kernel from the gate-author's sieve.
-    ::  A loobean %.n still crashes via ?> below (preserves STARK
-    ::  unprovability). Only a runtime crash gets converted to a typed
-    ::  effect here.
+    ::  AUDIT 2026-04-19 M-11: mule-wrap the gate call. The gate may
+    ::  `;;(domain-type data)` internally — a crafted `data` subtree
+    ::  otherwise panics the kernel from the gate-author's sieve. The
+    ::  mule converts that runtime crash to a typed %settle-error
+    ::  effect.
+    ::
+    ::  A loobean %.n from the gate (clean deny — e.g. signature
+    ::  invalid, set-membership check fails) emits a typed
+    ::  %settle-denied effect. State is unchanged on denial, the
+    ::  same as if the kernel had crashed; the typed effect lets the
+    ::  hull distinguish gate clean-deny from rbac-deny and other
+    ::  rejection paths without scraping the kernel's stderr.
     ::
     =/  veri-result
       %-  mule  |.
@@ -218,9 +225,9 @@
     ?:  ?=(%| -.veri-result)
       :_  state
       ~[[%settle-error 'settle-graft: verify gate crashed']]
-    ::  Verify via caller's gate — crash on failure
-    ::
-    ?>  p.veri-result
+    ?.  p.veri-result
+      :_  state
+      ~[[%settle-denied 'settle-graft: verify gate returned false']]
     ::  Apply settlement. Rotate iff the current epoch is already at cap.
     ::
     =/  at-cap=?  (gte settle-count.state epoch-cap)
