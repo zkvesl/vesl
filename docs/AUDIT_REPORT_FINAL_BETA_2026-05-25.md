@@ -274,12 +274,15 @@ unaffected.
 
 ### H-25 — Templates' `build.rs` invokes `hoonc` from PATH (H-19 residual in 7 of 8 templates)
 
-> **RESOLVED — 2026-05-25 (vesl-nockup `76f0a9e`).** Each of the seven
-> affected templates' `build.rs` resolves hoonc via a `resolve_hoonc()`
-> helper that consults `$HOONC_BIN` then `~/.cargo/bin/hoonc`; bare
-> PATH lookup is gone. Mirrors the H-19 fix shape for the nockup-graft
-> binary. Templates that can't find hoonc skip the JAM compile with a
-> `cargo:warning=`, never a panic.
+> **RESOLVED — 2026-05-25.** Canonical fix at vesl-core `3f9e20d`
+> (vesl-core/templates is the source-of-truth that vesl-nockup mirrors
+> via sync.sh). vesl-nockup carries the fix at `76f0a9e` (direct edit,
+> pre-resync) and re-applied via `b11f3bf` (post-sync from vesl-core).
+> Each of the seven affected templates' `build.rs` resolves hoonc via
+> a `resolve_hoonc()` helper that consults `$HOONC_BIN` then
+> `~/.cargo/bin/hoonc`; bare PATH lookup is gone. Mirrors the H-19
+> fix shape for the nockup-graft binary. Templates that can't find
+> hoonc skip the JAM compile with a `cargo:warning=`, never a panic.
 
 **Severity:** High (kernel-substitution via PATH-hijack on cargo build)
 **Repo:** vesl-nockup
@@ -835,7 +838,7 @@ This section is updated as each fix lands. Status keys:
 |---|---|---|---|
 | H-23 | High | vesl-core | **RESOLVED** (`fecfed8`) |
 | H-24 | High | vesl-core | **RESOLVED** (`f11c15d`) |
-| H-25 | High | vesl-nockup | **RESOLVED** (`76f0a9e`) |
+| H-25 | High | vesl-core (source), vesl-nockup (mirror) | **RESOLVED** (vesl-core `3f9e20d`; vesl-nockup `76f0a9e` + `b11f3bf`) |
 | H-26 | High | vesl-wallet | **RESOLVED** (`880b77c`) |
 | M-32 | Medium | vesl-core | OPEN |
 | M-33 | Medium | vesl-wallet | OPEN |
