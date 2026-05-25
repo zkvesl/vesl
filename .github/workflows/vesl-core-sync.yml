@@ -34,11 +34,15 @@ jobs:
           # head so sync.sh sees the same SHA we pin via VESL_CORE_PIN.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Checkout vesl-nockup (main)
+      - name: Checkout vesl-nockup (dev)
         uses: actions/checkout@v4
         with:
           repository: zkvesl/vesl-nockup
-          ref: main
+          # Track dev rather than main: dev is the working branch where
+          # sync commits land first, main only catches up on squash-merge
+          # at release time. Checking main means stale sync state during
+          # the entire dev cycle. dev is always at-or-ahead-of main.
+          ref: dev
           path: vesl-nockup
 
       - name: Extract vesl-wallet pin from vesl-nockup sync.sh

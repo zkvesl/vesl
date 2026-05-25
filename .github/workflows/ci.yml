@@ -10,8 +10,14 @@ on:
 # sibling nockchain monorepo at NOCK_PIN so vesl-core's nockchain
 # path-deps resolve. NOCK_PIN mirrors jam-determinism.yml and sync.sh —
 # scripts/check-pins.sh gates the match.
+#
+# Same pattern for VESL_WALLET_PIN: vesl-core has path-deps to
+# `../../../vesl-wallet/crates/{vesl-signing,vesl-wallet-spec,vesl-wallet}`,
+# so CI checks out vesl-wallet as a sibling. Bump this when vesl-wallet
+# ships a compatible release.
 env:
   NOCK_PIN: fe46f4e3a0ce9532288e9cf3a3fb7e94bf9cba1f
+  VESL_WALLET_PIN: f19904e61dc085ed96dede6c354ecee3a53c6d63
 
 jobs:
   check-pins:
@@ -34,6 +40,12 @@ jobs:
           repository: nockchain/nockchain
           ref: ${{ env.NOCK_PIN }}
           path: nockchain
+      - name: Checkout vesl-wallet (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: zkvesl/vesl-wallet
+          ref: ${{ env.VESL_WALLET_PIN }}
+          path: vesl-wallet
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
@@ -55,6 +67,12 @@ jobs:
           repository: nockchain/nockchain
           ref: ${{ env.NOCK_PIN }}
           path: nockchain
+      - name: Checkout vesl-wallet (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: zkvesl/vesl-wallet
+          ref: ${{ env.VESL_WALLET_PIN }}
+          path: vesl-wallet
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install cargo-audit
         run: cargo install cargo-audit
@@ -75,6 +93,12 @@ jobs:
           repository: nockchain/nockchain
           ref: ${{ env.NOCK_PIN }}
           path: nockchain
+      - name: Checkout vesl-wallet (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: zkvesl/vesl-wallet
+          ref: ${{ env.VESL_WALLET_PIN }}
+          path: vesl-wallet
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
