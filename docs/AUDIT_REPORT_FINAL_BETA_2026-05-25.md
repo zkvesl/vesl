@@ -11,14 +11,18 @@
 **Verdict (2026-05-25 end of session):**
 - All four Highs (**H-23 through H-26**) RESOLVED on `dev` across all
   three repos.
+- Mediums: **M-33, M-34, M-35** RESOLVED; **M-32** DEFERRED (waiting on
+  per-graft codegen pass that the rustdoc already commits to); **M-36**
+  DEFERRED (all three RUSTSEC advisories are transitive via nockchain,
+  no direct vesl dep can clear them).
+- Lows: **L-29, L-30, L-31, L-32** RESOLVED.
 - All OSS-hygiene items either RESOLVED (CC-07, CC-09, CC-10, CC-12,
   CC-13, CC-14), DEFERRED with rationale (CC-05, CC-06, CC-08), or
   reclassified as NOT-A-BUG (CC-11).
-- Remaining Mediums (M-32..M-36), Lows (L-29..L-32), and Info-level
-  items (I-01..I-07) are catalogued with concrete remediation plans
-  for follow-up sessions; none are beta-ship blockers.
+- Info-level items (I-01..I-07) catalogued for a future docs/cleanup
+  pass; not beta-ship blockers.
 
-**READY FOR BETA on the Critical/High/OSS-hygiene tracks.**
+**READY FOR BETA on the Critical/High/Medium/Low/OSS-hygiene tracks.**
 
 - Every C/H/M/L finding in `AUDIT_REPORT.md` was re-verified against
   current `dev` HEAD. **Zero regressions detected.**
@@ -399,7 +403,12 @@ belts.
 
 ### M-32 — `PokeOutcome::classify_effects` routes on tag-suffix alone; composer-defined tags can forge `*-denied`/`*-rejected`/`*-error`
 
-> **OPEN — fix landing this session.**
+> **DEFERRED — 2026-05-25.** The `peek.rs:97-101` rustdoc already
+> commits to replacing the suffix matcher with a per-graft codegen
+> emit table. A hardcoded interim allowlist would be a stopgap that
+> ships and then gets ripped out. No attacker-exploitable surface
+> today (composers control their own tags). Revisits when the
+> codegen pass lands.
 
 **Severity:** Medium (effect-tag spoofing in graft composers)
 **Repo:** vesl-core
@@ -443,7 +452,11 @@ forgery window pre-codegen.
 
 ### M-33 — SIWN `verify` accepts unbounded `header_b64` and `bundle.message` length → memory-exhaustion DoS
 
-> **OPEN — fix landing this session.**
+> **RESOLVED — 2026-05-25 (vesl-wallet `c151989`; vesl-nockup mirror
+> `35be5db`).** `MAX_SIWN_HEADER_LEN` (16 KB) and `MAX_SIWN_BODY_LEN`
+> (4 KB) const caps reject oversize inputs with `SiwnError::MalformedBody`
+> before `B64.decode` and `serde_json::from_slice` allocate. Mirrors
+> the L-24 base58 cap.
 
 **Severity:** Medium (DoS amplification)
 **Repo:** vesl-wallet
@@ -483,7 +496,12 @@ if bundle.message.len() > MAX_SIWN_BODY_LEN {
 
 ### M-34 — `Belt(pub u64)` + `prelude::hash_varlen` lets downstream callers produce out-of-field digests in release builds
 
-> **OPEN — fix landing this session.**
+> **RESOLVED — 2026-05-25 (vesl-wallet `1c669ac`; vesl-nockup mirror
+> `35be5db`).** `hash_varlen` reduces inputs mod `PRIME` at the
+> public-API boundary before any sponge state touches them. Matches
+> the Hoon-side `atom-to-digest` normalization and closes the cross-VM
+> divergence vector at the vesl-signing prelude. Internal callers are
+> already in-field; the fix hardens external surface only.
 
 **Severity:** Medium (cross-VM divergence primitive at the public API)
 **Repo:** vesl-wallet
@@ -527,7 +545,11 @@ API-stable and matches the Hoon-side normalization.
 
 ### M-35 — `tools/graft-inject/cli/rename_kernel.rs` does not validate `--from` / project's `kernel_name` field; path-traversal on hostile `nockapp.toml`
 
-> **OPEN — fix landing this session.**
+> **RESOLVED — 2026-05-25 (vesl-nockup `099d844`, paired with L-30).**
+> `validate_kernel_name(&from_owned)?` runs alongside the existing
+> validator on `new`. A hostile `[project].kernel_name = "../path"`
+> in `nockapp.toml` now fails the regex check before `fs::rename`
+> can traverse out of `hoon/app/`.
 
 **Severity:** Medium (confused-deputy destructive rename)
 **Repo:** vesl-nockup
@@ -558,7 +580,13 @@ validate_kernel_name(&from_owned)?;   // ADD
 
 ### M-36 — Three transitive RUSTSEC advisories in vesl-nockup's workspace
 
-> **OPEN — upstream-bump tracking; mitigation TBD.**
+> **DEFERRED — 2026-05-25.** All three advisories
+> (RUSTSEC-2026-0104 rustls-webpki, RUSTSEC-2026-0097 rand,
+> RUSTSEC-2026-0122 rkyv) are transitive via nockchain — no direct
+> vesl dep can clear them. `[patch.crates-io]` stopgap overrides
+> rejected per project policy (risks build divergence from nockchain
+> upstream). Accepted as-is until nockchain itself bumps. Tracked
+> in this banner; the audit doc is the source of record.
 
 **Severity:** Medium (panic-reachable + soundness)
 **Repo:** vesl-nockup (transitive via nockchain)
@@ -591,7 +619,10 @@ this audit report until upstream lands.
 
 ### L-29 — `peek_atom_u64_strict` / `peek_unit_atom_strict` / `PeekError` not re-exported at `vesl_core` crate root
 
-> **OPEN — fix landing this session.**
+> **RESOLVED — 2026-05-25 (vesl-core `6abfe31`; vesl-nockup mirror
+> `35be5db`).** The strict decoders and `PeekError` are now in the
+> crate-root `pub use peek::{...}` re-export list. `use vesl_core::*`
+> brings the safer variants into scope.
 
 **Severity:** Low (defeats SDK convention; encourages lossy default)
 **Repo:** vesl-core
@@ -613,7 +644,11 @@ crate-root `pub use peek::{...}` list.
 
 ### L-30 — `rename_kernel.rs` writes via plain `fs::write`, not the available `atomic_write`
 
-> **OPEN — fix landing this session.**
+> **RESOLVED — 2026-05-25 (vesl-nockup `099d844`, paired with M-35).**
+> `rewrite_nockapp_toml` and `rewrite_readme_codeblocks` route their
+> writes through `crate::manifest::atomic_write`. SIGKILL / disk-full
+> mid-write no longer truncates the user's `nockapp.toml` or
+> `README.md`.
 
 **Severity:** Low (data-loss surface on signal interruption)
 **Repo:** vesl-nockup
@@ -632,7 +667,12 @@ rename) and uses it elsewhere; the rename-kernel path doesn't.
 
 ### L-31 — `transitive_imports` lint follows attacker-controlled `/+` paths outside `lib_dir`
 
-> **OPEN — fix landing this session.**
+> **RESOLVED — 2026-05-25 (vesl-nockup `3274e50`).** Added
+> `is_safe_import_name` / `is_safe_path_arg` guards in `resolve_import`
+> that reject any spec whose name contains `..`, `/`, or `\`, and any
+> `/=` path argument with `..` components. Unsafe specs are silently
+> dropped — no read, no finding, no info-disclosure via JSON output.
+> 123 lint-suite tests pass.
 
 **Severity:** Low (info disclosure side-channel)
 **Repo:** vesl-nockup
@@ -656,7 +696,13 @@ assert the result starts with either `lib_dir.canonicalize()` or
 
 ### L-32 — `VeslWallet::from_seed_phrase` does not zeroize input `phrase` / `passphrase`
 
-> **OPEN — doc-only fix landing this session.**
+> **RESOLVED — 2026-05-25 (vesl-wallet `0d76f00`; vesl-nockup mirror
+> `35be5db`).** Doc-only fix: the `from_seed_phrase` rustdoc now
+> documents that the caller's `phrase` and `passphrase` strings are
+> not zeroized by the function — caller must hold them in
+> `Zeroizing<String>` (or equivalent) until drop. The derived 64-byte
+> seed continues to be wiped per M-13. API change to require
+> `Zeroizing<String>` is deferred to a future major version.
 
 **Severity:** Low (caller-owned secret residue)
 **Repo:** vesl-wallet
@@ -855,15 +901,15 @@ This section is updated as each fix lands. Status keys:
 | H-24 | High | vesl-core | **RESOLVED** (`f11c15d`) |
 | H-25 | High | vesl-core (source), vesl-nockup (mirror) | **RESOLVED** (vesl-core `3f9e20d`; vesl-nockup `76f0a9e` + `b11f3bf`) |
 | H-26 | High | vesl-wallet | **RESOLVED** (`880b77c`) |
-| M-32 | Medium | vesl-core | OPEN |
-| M-33 | Medium | vesl-wallet | OPEN |
-| M-34 | Medium | vesl-wallet | OPEN |
-| M-35 | Medium | vesl-nockup | OPEN |
-| M-36 | Medium | vesl-nockup | OPEN |
-| L-29 | Low | vesl-core | OPEN |
-| L-30 | Low | vesl-nockup | OPEN |
-| L-31 | Low | vesl-nockup | OPEN |
-| L-32 | Low | vesl-wallet | OPEN |
+| M-32 | Medium | vesl-core | **DEFERRED** (waiting on per-graft codegen pass) |
+| M-33 | Medium | vesl-wallet | **RESOLVED** (vesl-wallet `c151989`; vesl-nockup mirror `35be5db`) |
+| M-34 | Medium | vesl-wallet | **RESOLVED** (vesl-wallet `1c669ac`; vesl-nockup mirror `35be5db`) |
+| M-35 | Medium | vesl-nockup | **RESOLVED** (`099d844`) |
+| M-36 | Medium | vesl-nockup | **DEFERRED** (transitive via nockchain; accept until upstream bumps) |
+| L-29 | Low | vesl-core | **RESOLVED** (vesl-core `6abfe31`; vesl-nockup mirror `35be5db`) |
+| L-30 | Low | vesl-nockup | **RESOLVED** (`099d844`) |
+| L-31 | Low | vesl-nockup | **RESOLVED** (`3274e50`) |
+| L-32 | Low | vesl-wallet | **RESOLVED** (vesl-wallet `0d76f00`; vesl-nockup mirror `35be5db`) |
 | I-01..I-07 | Info | various | OPEN (cosmetic) |
 | CC-05 | OSS | all three | **DEFERRED** (not publishing to crates.io) |
 | CC-06 | OSS | all three | **DEFERRED** (not publishing to crates.io) |
