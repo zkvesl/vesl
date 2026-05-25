@@ -1,0 +1,49 @@
+name: Feature request
+description: A new capability, API shape, or behavior you'd like vesl-core to support.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are scoped against the project's actual goals.
+        Lead with the problem; we'll figure out the right shape together.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the current code doesn't support?
+      placeholder: |
+        I'm building [...]. The current API lets me [...] but not [...].
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape (optional)
+      description: |
+        If you've thought about how this could land, sketch it. A new arm in
+        a graft, a new Rust API, a new template — whatever fits.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What did you try first? What didn't fit, and why?
+    validations:
+      required: false
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Where does this live?
+      options:
+        - Hoon protocol (lib, kernel, graft)
+        - Rust vessel / boundary crate
+        - Kernel JAM / asset
+        - Template / scaffold
+        - Docs only
+        - Not sure
+    validations:
+      required: true

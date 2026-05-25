@@ -1,0 +1,58 @@
+name: Bug report
+description: A behavior that doesn't match what the code, docs, or audit reports say it should do.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug.
+
+        **Security issues do not belong here.** If you've found something that
+        bypasses a kernel-integrity check, breaks STARK soundness, breaks a
+        cross-VM digest equivalence, or otherwise breaks the threat model in
+        `docs/AUDIT_REPORT_FINAL_BETA_2026-05-25.md`, report it privately via
+        [GitHub Security Advisories](https://github.com/zkvesl/vesl-core/security/advisories/new).
+  - type: input
+    id: surface
+    attributes:
+      label: Surface
+      description: Hoon kernel / Rust vessel / boundary crate / kernel JAM / template / something else?
+      placeholder: e.g. "vesl-merkle.hoon verify-payload" or "crates/nockchain-tip5-rs"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you observe? What did you expect?
+      placeholder: |
+        I poked %settle with payload [...] and the kernel emitted [...].
+        I expected [...].
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Shortest path to trigger the bug. Commands, input nouns, source snippets.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / version
+      description: vesl-core SHA on `dev`, release tag, or a downstream pin.
+      placeholder: e.g. "dev@f11c15d" or "v0.5.0-beta.1"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, hoonc version, nockchain checkout, NOCK_PIN if relevant.
+      placeholder: |
+        Linux 6.18; hoonc 0.2.0; nockchain @ test/all-4-prs-merged
+    validations:
+      required: false
