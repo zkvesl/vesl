@@ -120,8 +120,8 @@ pub use nock_noun_rs::{rejam_atom, RejamError};
 pub use peek::{
     build_hull_peek_path, build_keyed_peek_path, build_keyless_peek_path,
     decode_effect_cord, decode_effect_loobean, decode_queue_popped, decode_settle_error,
-    effect_head_tag, effect_head_tags, peek_atom_u64, peek_loobean, peek_unit_list,
-    unwrap_triple_unit_atom,
+    effect_head_tag, effect_head_tags, peek_atom_u64, peek_atom_u64_strict, peek_loobean,
+    peek_unit_atom_strict, peek_unit_list, unwrap_triple_unit_atom, PeekError,
 };
 
 // Typed `NockApp::poke` outcome. See `crates/vesl-core/src/poke.rs` for
