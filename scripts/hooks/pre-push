@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Pre-push hook for vesl-core. Gates pushes to refs/heads/{dev,main} on
+# scripts/preflight.sh; other branches push freely.
+#
+# Enable per-clone:
+#   git config core.hooksPath scripts/hooks
+#
+# Skip ad-hoc:
+#   git push --no-verify
+
+set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HOOK_DIR/../.." && pwd)"
+
+# git pipes "<local_ref> <local_sha> <remote_ref> <remote_sha>" per ref.
+needs_preflight=0
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    case "$remote_ref" in
+        refs/heads/dev|refs/heads/main) needs_preflight=1 ;;
+    esac
+done
+
+if (( needs_preflight )); then
+    exec "$REPO_ROOT/scripts/preflight.sh"
+fi
+exit 0
