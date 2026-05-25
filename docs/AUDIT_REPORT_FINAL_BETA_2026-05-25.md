@@ -8,10 +8,17 @@
 
 ## 0. Status banner
 
-**Verdict (2026-05-25 end of session): the four Highs H-23 through H-26
-are RESOLVED on `dev` across all three repos. The remaining Medium /
-Low / Info / OSS-hygiene items are scoped for follow-up sessions and
-are not beta-ship blockers. READY FOR BETA on the Critical/High track.**
+**Verdict (2026-05-25 end of session):**
+- All four Highs (**H-23 through H-26**) RESOLVED on `dev` across all
+  three repos.
+- All OSS-hygiene items either RESOLVED (CC-07, CC-09, CC-10, CC-12,
+  CC-13, CC-14), DEFERRED with rationale (CC-05, CC-06, CC-08), or
+  reclassified as NOT-A-BUG (CC-11).
+- Remaining Mediums (M-32..M-36), Lows (L-29..L-32), and Info-level
+  items (I-01..I-07) are catalogued with concrete remediation plans
+  for follow-up sessions; none are beta-ship blockers.
+
+**READY FOR BETA on the Critical/High/OSS-hygiene tracks.**
 
 - Every C/H/M/L finding in `AUDIT_REPORT.md` was re-verified against
   current `dev` HEAD. **Zero regressions detected.**
@@ -717,51 +724,59 @@ change to require `Zeroizing<String>` is a follow-up consideration.
 ### 6.2 OSS hygiene gaps (cross-cutting)
 
 > The repos handle crypto and ship as foundation infrastructure.
-> The bar for OSS hygiene is high. Below are the gaps that gate an
-> A/A+ senior-engineer review.
+> Below are the gaps the sweep flagged plus their remediation
+> status as of end-of-session.
 
-- **CC-05 — `missing_docs` across the four headline lib crates.**
-  - `vesl-core`: 85 errors. Headline crate of the org.
-  - `vesl-signing`: 77 errors. The foundation primitive marketed
-    to hardware-wallet vendors, light clients, oracle services.
-  - `vesl-hull`: 63 errors. The canonical HTTP API surface.
-  - `nockchain-tip5-rs`: 4 errors.
-  - **Total: 229 undocumented public items.** docs.rs renders
-    these as bare type signatures. Land `#![warn(missing_docs)]`
-    at each lib.rs (signals intent without breaking CI), document
-    crate-level + top-level modules + most-public re-exports as
-    a v0.6.0-blocking pass.
-- **CC-06 — Cargo metadata gaps.** `repository`, `homepage`,
-  `documentation`, `keywords`, `categories` absent on every
-  workspace member across all three repos except vesl-wallet's
-  three published crates. Workspace-level `[workspace.package]`
-  block closes this in <30 min.
-- **CC-07 — No SECURITY.md in any repo.** All three handle crypto;
-  vulnerability-disclosure mailbox + GPG key is table-stakes.
-  vesl-wallet's CONTRIBUTING.md explicitly says
-  "see SECURITY.md (when added)" — promise-vs-delivery gap.
-- **CC-08 — No CODE_OF_CONDUCT.md anywhere.** Standard
-  Contributor Covenant is a 5-min copy-paste.
-- **CC-09 — No `.github/ISSUE_TEMPLATE/` anywhere.** Bug-report
-  + feature-request templates: 10 min each.
-- **CC-10 — vesl-nockup `vesl-hull` uses `println!`/`eprintln!` in
-  library code.** Concentrated in `vesl-hull/src/{signing.rs,
-  verify.rs, api/mod.rs, config.rs, poke.rs, settle_builder.rs}`.
-  Should be `tracing::info!` / `tracing::warn!`.
-- **CC-11 — `rust-toolchain.toml` disagrees across repos.**
-  vesl-core: `nightly-2025-11-26` (pinned). vesl-nockup: `nightly`
-  (drift-prone). vesl-wallet: `stable` (intentional stable-clean).
-  Align vesl-nockup's pin with vesl-core's date.
-- **CC-12 — vesl-wallet `.github/CODEOWNERS` has placeholder
-  handles** (`@TODO-founder-handle`, `@TODO-engineer-1-handle`).
-  GitHub treats invalid handles as no-owner; the file is silently
-  broken. Fix or remove.
-- **CC-13 — `MAINTENANCE_AUDIT_LOG_2026-*.md` clutter at
-  vesl-core repo root** (five files, Apr 24 through May 15).
-  Move to `docs/audit-logs/` or `.dev/`.
-- **CC-14 — No CHANGELOG.md in vesl-core or vesl-nockup.**
-  vesl-wallet has one but the `[Unreleased]` block carries 100+
-  items — cut to `0.1.0` on the next release.
+- **CC-05 — DEFERRED.** 229 `missing_docs` errors total across
+  vesl-core (85), vesl-signing (77), vesl-hull (63), and
+  nockchain-tip5-rs (4). The crates are not published to crates.io
+  (no community request to-date), so the docs.rs presentation gap
+  has no audience. Item revisits if/when publication is requested.
+- **CC-06 — DEFERRED.** Cargo metadata fields (`repository`,
+  `homepage`, `documentation`, `keywords`, `categories`) are missing
+  from non-published crates by design — vesl-core / vesl-nockup are
+  not shipping to crates.io. Re-open with CC-05 when/if that
+  changes.
+- **CC-07 — RESOLVED.** SECURITY.md added to all three repos
+  pointing at GitHub Security Advisories: vesl-core `f86c758`,
+  vesl-nockup `a0e41fa`, vesl-wallet `feee657`. Each policy names
+  per-repo scope (kernel/protocol/STARK/boundary in vesl-core;
+  supply chain / CLI / hull HTTP in vesl-nockup; Schnorr / HD /
+  CAIP-122 / Tip5 in vesl-wallet) and routes unmodified-mirror
+  bugs back to the source repo.
+- **CC-08 — DEFERRED.** No CODE_OF_CONDUCT.md by explicit
+  decision; revisits with community-feedback signal.
+- **CC-09 — RESOLVED.** GitHub YAML issue forms landed in all
+  three repos (`bug-report.yml`, `feature-request.yml`, `config.yml`):
+  vesl-core `f2327a5`, vesl-nockup `bbdb8b0`, vesl-wallet `a828279`.
+  `config.yml` disables blank issues, routes security to
+  Security Advisories, and routes mirrored-crate bugs to source
+  repos.
+- **CC-10 — RESOLVED.** vesl-nockup `b3378cd`. Eight lib-code
+  `println!`/`eprintln!` sites in vesl-hull (config.rs, api/mod.rs,
+  api/poke.rs, api/handlers/verify.rs, settle_builder.rs) now use
+  `tracing::warn!` / `tracing::error!` / `tracing::info!` at
+  appropriate severity, each with a `target:` namespace. Two
+  flagged sites in `#[cfg(test)] mod tests` are left as
+  `println!` (test code, not lib code; the audit miscategorized).
+- **CC-11 — NOT-A-BUG.** vesl-nockup's bare `nightly` channel is
+  intentional project policy: vesl-nockup is a CLI tool distribution
+  whose templates compile against current upstream nockchain, and
+  pinning to a vesl-core-aligned date would lock contributors to a
+  stale rustc relative to nockchain's HEAD. vesl-core stays pinned
+  for kernel-JAM reproducibility; vesl-wallet stays on stable per
+  stable-clean policy. No alignment needed.
+- **CC-12 — RESOLVED.** vesl-wallet `b1f9a7f`. CODEOWNERS
+  placeholders (`@TODO-founder-handle`, `@TODO-engineer-1-handle`)
+  replaced with `@sobchek`; review-request routing now works.
+- **CC-13 — RESOLVED.** vesl-core `76e745d`. Five
+  `MAINTENANCE_AUDIT_LOG_2026-*.md` files relocated from the repo
+  root to `docs/audit-logs/`. Pure `git mv`; content unchanged.
+- **CC-14 — RESOLVED (seeded).** vesl-core `d0790a1`, vesl-nockup
+  `cb8657c`. Keep a Changelog 1.1.0 headers seeded with explicit
+  "tracking begins post-beta" notes; vesl-wallet's existing
+  CHANGELOG is unchanged. Per-release entries land starting with
+  the next post-beta tag.
 
 ---
 
@@ -850,16 +865,16 @@ This section is updated as each fix lands. Status keys:
 | L-31 | Low | vesl-nockup | OPEN |
 | L-32 | Low | vesl-wallet | OPEN |
 | I-01..I-07 | Info | various | OPEN (cosmetic) |
-| CC-05 | OSS | all three | OPEN (partial pass scoped) |
-| CC-06 | OSS | all three | OPEN |
-| CC-07 | OSS | all three | OPEN |
-| CC-08 | OSS | all three | OPEN |
-| CC-09 | OSS | all three | OPEN |
-| CC-10 | OSS | vesl-nockup | OPEN (deferred to v0.6.0) |
-| CC-11 | OSS | vesl-nockup | OPEN |
-| CC-12 | OSS | vesl-wallet | OPEN |
-| CC-13 | OSS | vesl-core | OPEN |
-| CC-14 | OSS | vesl-core, vesl-nockup | OPEN |
+| CC-05 | OSS | all three | **DEFERRED** (not publishing to crates.io) |
+| CC-06 | OSS | all three | **DEFERRED** (not publishing to crates.io) |
+| CC-07 | OSS | all three | **RESOLVED** (vesl-core `f86c758`; vesl-nockup `a0e41fa`; vesl-wallet `feee657`) |
+| CC-08 | OSS | all three | **DEFERRED** (explicit decision) |
+| CC-09 | OSS | all three | **RESOLVED** (vesl-core `f2327a5`; vesl-nockup `bbdb8b0`; vesl-wallet `a828279`) |
+| CC-10 | OSS | vesl-nockup | **RESOLVED** (`b3378cd`) |
+| CC-11 | OSS | vesl-nockup | **NOT-A-BUG** (bare nightly is intentional) |
+| CC-12 | OSS | vesl-wallet | **RESOLVED** (`b1f9a7f`) |
+| CC-13 | OSS | vesl-core | **RESOLVED** (`76e745d`) |
+| CC-14 | OSS | vesl-core, vesl-nockup | **RESOLVED** (vesl-core `d0790a1`; vesl-nockup `cb8657c`) |
 
 ---
 
