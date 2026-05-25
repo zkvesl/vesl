@@ -99,6 +99,15 @@
       (prove-computation subject formula root hull.cause)
     ?.  -.attempt
       ~[[%forge-error 'forge-graft: prove-computation crashed']]
-    ~[[%forge-proved hull.cause note-id.cause p.attempt]]
+    ::  AUDIT 2026-05-25 H-23: sieve the inner +each discriminator.
+    ::  A clean [%| %too-big ...] prover error has -.attempt=%.y
+    ::  (the mule didn't crash) but p.attempt is the error variant,
+    ::  not a proof. Without this guard the kernel emits the err-noun
+    ::  as if it were a proof. Same bug class as production C-03
+    ::  (forge-kernel.hoon:329); kept the wording symmetric.
+    ::
+    ?.  ?=(%& -.p.attempt)
+      ~[[%forge-error 'forge-graft: prover returned error variant']]
+    ~[[%forge-proved hull.cause note-id.cause +.p.attempt]]
   ==
 --
