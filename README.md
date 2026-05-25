@@ -48,7 +48,7 @@ templates/                      starter NockApps + graft templates
   graft-intent/                                   family-5 placeholder stub (see MOVED.md)
   GRAFTING.md                                     long-form integration guide
 
-assets/                         compiled kernel JAMs (mint, guard, settle)
+assets/                         compiled kernel JAMs (mint, guard, settle, forge)
 scripts/                        setup + template checks
 hoon/                           symlink tree (setup-hoon-tree.sh links $NOCK_HOME)
 ```
@@ -60,9 +60,9 @@ Five graft families, one row each. Priority bands come straight from [`docs/graf
 | # | Family | Role | Priority band | Status | What ships today |
 |---|---|---|---|---|---|
 | 1 | Commitment | STARK-bearing primitives that commit data to hull-keyed roots | 10–40 | Shipped | `settle-graft` (10), `mint-graft` (20), `guard-graft` (30), `forge-graft` (40) |
-| 2 | Verification gates | Parameterized decision functions consumed by commitment grafts; a library, not a priority-claimed graft | n/a (library) | Scaffolded | `vesl-gates.hoon` (planned; see `.dev/01_GATE_CATALOG.md`) |
+| 2 | Verification gates | Parameterized decision functions consumed by commitment grafts; a library, not a priority-claimed graft | n/a (library) | Scaffolded | `vesl-gates.hoon` |
 | 3 | State | Domain-keyed app-state primitives (kv, counter, queue, rbac, registry) | 50–99 | Shipped | `kv-graft` (50), `counter-graft` (60), `queue-graft` (70), `rbac-graft` (80), `registry-graft` (90) |
-| 4 | Behavior | Runtime wrappers that enforce or observe rules around other grafts | 100–149 | Planned | see `.dev/03_BEHAVIOR_GRAFTS.md` |
+| 4 | Behavior | Runtime wrappers that enforce or observe rules around other grafts | 100–149 | Planned | — |
 | 5 | Intent | Multi-party coordination primitives (declare / match / cancel / expire) | 200–299 | Placeholder | `intent-graft` stub; crashes on invocation pending canonical upstream |
 
 Commitments do not require intents. A NockApp can produce a ZK proof and settle it without ever declaring an intent. Intents are optional coordination on top of commitments — the STARK pipeline itself is intent-free.
@@ -138,7 +138,6 @@ make test                           # all tests (unit + e2e)
 Hoon tests are compile-time assertions — build success means pass:
 
 ```bash
-hoonc --new protocol/tests/red-team.hoon hoon/
 hoonc --new protocol/tests/prove-verify.hoon hoon/
 ```
 
