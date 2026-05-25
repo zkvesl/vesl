@@ -158,7 +158,17 @@
 ::
 ::  Walks (leaves, proofs) in lock-step.  Each leaf must hash to a leaf
 ::  position whose sibling chain resolves to expected-root.  Returns
-::  %.y iff lists are equal-length AND every (leaf, proof) pair verifies.
+::  %.y iff lists are equal-length, non-empty, AND every (leaf, proof)
+::  pair verifies against expected-root.
+::
+::  AUDIT 2026-05-25 H-24: an empty leaves list is rejected at the API
+::  edge.  Without that guard the inner `?~ leaves %.y` trap fires
+::  vacuously for any caller submitting `[leaves=~ proofs=~]`, and
+::  guard-kernel / settle-kernel — both of which call this directly
+::  with attacker-supplied lists from the cued payload — would mark
+::  arbitrary (note, root) tuples as verified, settling without data.
+::  An empty payload is not a valid commitment to expected-root for
+::  any expected-root; callers must hold at least one leaf.
 ::
 ::  Domain-agnostic.  guard-kernel and settle-kernel call this in place
 ::  of any RAG-specific verifier.  RAG manifest verification (prompt
@@ -170,6 +180,7 @@
           expected-root=@
       ==
   ^-  ?
+  ?:  =(~ leaves)  %.n
   ?.  =((lent leaves) (lent proofs))  %.n
   |-
   ?~  leaves  %.y
