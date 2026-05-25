@@ -13,7 +13,21 @@ fn main() {
     let hoon_app_file = "hoon/app/app.hoon";
 
     if Path::new(hoon_app_file).exists() {
-        let output = Command::new("hoonc")
+        // AUDIT 2026-05-25 H-25: resolve hoonc the same way nockup-graft
+        // is resolved in `vesl/build.rs` (audit H-19) — explicit
+        // `HOONC_BIN`, then ~/.cargo/bin/hoonc, never a bare PATH search.
+        // A malicious `hoonc` earlier on PATH would otherwise hijack
+        // `cargo build` AND produce an attacker-controlled `out.jam`
+        // baked into the released binary.
+        let Some(hoonc) = resolve_hoonc() else {
+            println!(
+                "cargo:warning=hoonc not found at $HOONC_BIN or ~/.cargo/bin/hoonc; \
+                 skipping kernel JAM compile. Install via the nockchain quick-start \
+                 or set HOONC_BIN to a binary path."
+            );
+            return;
+        };
+        let output = Command::new(&hoonc)
             .args([hoon_app_file, "--output", &format!("{}/app.nock", out_dir)])
             .output();
 
@@ -92,4 +106,23 @@ fn emit_kernel_cause_tags(out_dir: &str, hoon_app_file: &str) {
         ),
     }
     let _ = fs::metadata(out_dir);
+}
+
+/// Resolve the hoonc binary path with no PATH lookup. Tries an explicit
+/// `HOONC_BIN` env var first, then ~/.cargo/bin/hoonc, then gives up.
+/// Per audit 2026-05-25 H-25 — never bare PATH for the binary that
+/// produces our kernel JAM.
+fn resolve_hoonc() -> Option<String> {
+    if let Ok(p) = env::var("HOONC_BIN") {
+        if Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    if let Some(home) = env::var_os("HOME") {
+        let candidate = Path::new(&home).join(".cargo/bin/hoonc");
+        if candidate.exists() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
 }
