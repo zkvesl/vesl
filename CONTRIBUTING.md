@@ -18,11 +18,13 @@ vesl-core ships in two flavors that need to stay in sync:
 - **Rust crates** under `crates/` — `vesl-core` SDK, `nock-noun-rs`,
   `nockchain-tip5-rs`, `nockchain-client-rs`, `vesl-checkpoint`.
 - **Compiled JAMs** under `assets/` (`mint.jam`, `guard.jam`,
-  `settle.jam`, `forge.jam`) — checksummed in `CHECKSUMS.sha256`,
-  re-verified by CI's `jam-determinism` job on every PR.
+  `settle.jam`, `forge.jam`) — byte-shipped artifacts loaded via
+  `include_bytes!` in the `kernels/*` crates. The maintainer's
+  reference hashes live at `scripts/CHECKSUMS.sha256` and are
+  checked locally by the pre-push preflight (`scripts/check-jam.sh`).
 
 A change that touches a kernel's Hoon must regenerate + recommit
-its JAM in the same PR. The `jam-determinism` job will fail
+its JAM in the same PR. The local preflight gate will fail
 otherwise. See the "Modifying a Hoon kernel" section below.
 
 ## Good first PRs
@@ -90,7 +92,7 @@ Regen + commit flow:
 ```bash
 hoonc --ephemeral protocol/lib/<name>-kernel.hoon hoon/
 mv out.jam assets/<name>.jam
-cd assets && sha256sum guard.jam mint.jam settle.jam forge.jam > CHECKSUMS.sha256
+cd assets && sha256sum guard.jam mint.jam settle.jam forge.jam > ../scripts/CHECKSUMS.sha256
 scripts/check-jam.sh    # must return all-green before committing
 ```
 
@@ -123,8 +125,10 @@ cargo audit
 scripts/check-pins.sh
 
 # JAM determinism: recompiles guard / mint / settle / forge and
-# asserts sha256 matches assets/CHECKSUMS.sha256. Run after any
-# kernel Hoon edit; CI's jam-determinism job does the same.
+# asserts sha256 matches scripts/CHECKSUMS.sha256 (the maintainer's
+# reference hashes). Run after any kernel Hoon edit. The pre-push
+# preflight runs this; the CI-side gate is disabled (hoonc output
+# isn't byte-portable across environments).
 scripts/check-jam.sh
 ```
 
@@ -136,9 +140,10 @@ conversation):
 - **ci.yml** (`check-pins`, `test`, `audit`, `clippy`) — the
   workspace test + lint gate. `audit` is `cargo audit` on the
   transitive dep set; `clippy` is `-D warnings`.
-- **jam-determinism.yml** — checks out nockchain at `NOCK_PIN`,
-  builds `hoonc` once per cache key, runs `setup-hoon-tree.sh`,
-  verifies every kernel JAM against `assets/CHECKSUMS.sha256`.
+- **jam-determinism.yml** — currently disabled (`if: false`).
+  Re-enable when we land a reproducible-build setup for hoonc.
+  Local verification lives in `scripts/check-jam.sh` (run via
+  the pre-push preflight).
 - **vesl-core-sync.yml** — fails on non-empty `diff -rq
   --exclude=target vesl-core/crates vesl-nockup/crates`. Triggered
   on PRs touching `crates/*`. Catches the "fixed in vesl-core,

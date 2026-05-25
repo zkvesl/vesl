@@ -1,7 +1,7 @@
 name: JAM Determinism
 
 # Recompiles each kernel from protocol/lib/*.hoon and asserts the resulting
-# JAM sha256 matches assets/CHECKSUMS.sha256.
+# JAM sha256 matches scripts/CHECKSUMS.sha256 (the maintainer's reference).
 #
 # DISABLED (2026-05-25): the gate is over-strict for our build model. The
 # committed kernel JAMs are byte-shipped artifacts produced by the maintainer

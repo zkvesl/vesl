@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Recompile each kernel from source Hoon and assert the resulting JAM sha256
-# matches assets/CHECKSUMS.sha256.
+# matches scripts/CHECKSUMS.sha256 — the maintainer-side reference hashes.
+# (Lives under scripts/, not assets/, so it's clear it's a maintainer tool,
+# not a shipped artifact users re-verify.)
 #
 # Catches refactors that change kernel bytes without a reviewed checksum bump —
 # the class of bug that a "harmless" Hoon cleanup can introduce when nobody
@@ -56,7 +58,7 @@ for dir in common apps dat jams test-jams; do
     fi
 done
 
-CHECKSUMS="assets/CHECKSUMS.sha256"
+CHECKSUMS="scripts/CHECKSUMS.sha256"
 if [[ ! -f "$CHECKSUMS" ]]; then
     echo "error: $CHECKSUMS not found — nothing to verify against." >&2
     exit 2
