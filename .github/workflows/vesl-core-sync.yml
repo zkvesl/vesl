@@ -17,10 +17,18 @@ on:
     branches: [main, dev]
     paths:
       - 'crates/**'
+      - '.github/workflows/vesl-core-sync.yml'
   pull_request:
     branches: [main]
     paths:
       - 'crates/**'
+      - '.github/workflows/vesl-core-sync.yml'
+
+env:
+  # vesl-core/hoon/{common,dat,jams} are gitignored symlinks into a
+  # sibling nockchain checkout; sync.sh's cp -rL requires them. Mirror
+  # the canonical pin used by vesl-core/ci.yml.
+  NOCK_PIN: fe46f4e3a0ce9532288e9cf3a3fb7e94bf9cba1f
 
 jobs:
   sync-verify:
@@ -67,6 +75,23 @@ jobs:
           repository: zkvesl/vesl-wallet
           ref: ${{ steps.pins.outputs.wallet_pin }}
           path: vesl-wallet
+
+      - name: Checkout nockchain (sibling, at NOCK_PIN)
+        # vesl-core/hoon/{common,dat,jams} are symlinks resolved against
+        # this checkout; without it sync.sh's realpath check fails with
+        # "hoon/common does not resolve into a nockchain/hoon tree".
+        uses: actions/checkout@v4
+        with:
+          repository: nockchain/nockchain
+          ref: ${{ env.NOCK_PIN }}
+          path: nockchain
+
+      - name: Materialize vesl-core's hoon symlinks
+        env:
+          NOCK_HOME: ${{ github.workspace }}/nockchain
+        run: |
+          cd "$GITHUB_WORKSPACE/vesl-core"
+          ./scripts/setup-hoon-tree.sh
 
       - name: Run sync.sh --verify against PR head
         run: |
