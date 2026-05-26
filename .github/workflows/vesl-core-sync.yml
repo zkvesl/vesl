@@ -17,12 +17,10 @@ on:
     branches: [main, dev]
     paths:
       - 'crates/**'
-      - '.github/workflows/vesl-core-sync.yml'
   pull_request:
     branches: [main]
     paths:
       - 'crates/**'
-      - '.github/workflows/vesl-core-sync.yml'
 
 env:
   # vesl-core/hoon/{common,dat,jams} are gitignored symlinks into a
