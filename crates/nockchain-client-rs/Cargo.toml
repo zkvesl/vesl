@@ -1,6 +1,6 @@
 [package]
 name = "nockchain-client-rs"
-version = "0.1.0"
+version = "0.5.0-beta.1"
 edition = "2024"
 description = "Nockchain gRPC client — chain queries, wallet coordination, NoteData encoding for NockApp developers"
 license = "MIT OR Apache-2.0"

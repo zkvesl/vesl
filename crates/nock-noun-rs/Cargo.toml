@@ -1,6 +1,6 @@
 [package]
 name = "nock-noun-rs"
-version = "0.1.0"
+version = "0.5.0-beta.1"
 edition = "2024"
 description = "High-level Nock noun construction from Rust — NockStack helpers, cord/tag builders, jam/cue utilities"
 license = "MIT OR Apache-2.0"

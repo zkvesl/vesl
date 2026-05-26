@@ -1,6 +1,6 @@
 [package]
 name = "nockchain-tip5-rs"
-version = "0.1.0"
+version = "0.5.0-beta.1"
 edition = "2024"
 description = "Standalone tip5 Merkle tree — hash functions, tree construction, proof generation and verification with test vectors"
 license = "MIT OR Apache-2.0"
