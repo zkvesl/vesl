@@ -4,8 +4,6 @@ A verification SDK for Nockchain. Four primitives — **mint** (commit), **guard
 
 If you're building a NockApp, you probably want [vesl-nockup](https://github.com/zkvesl/vesl-nockup) — it bundles vesl-core, adds a `graft-inject` CLI for auto-wiring grafts into your kernel, ships a test harness, and works with the upstream `nockup` scaffolder. Clone this repo if you're working on the protocol itself.
 
-For the LLM/RAG reference implementation (ingest, retrieve, Ollama, on-chain settlement), see [zkvesl/hull-llm](https://github.com/zkvesl/hull-llm).
-
 ## Crates
 
 | Crate | Purpose |
